@@ -134,7 +134,7 @@ in `project.pbxproj`: new files join their target automatically.
   gives titles SF Rounded on the ticket, the round actions use `.roundActionBackground()` (flat disc in Minimal, glass in Fahrkarte);
   the map's lines and markers, chips and symbols use `Color.brandText`, the glass buttons' labels `Color.onBrand`; below the legs `CO2SavingButton` "−42 kg CO₂" → `CO2Sheet`, #386, from Kit `CO2Comparison`
   with the legs' cached track geometry; `WeatherLabel` "☀ 18° bei Ankunft" under the destination (summary card and the
-  last leg) and "beim Umstieg" under a transfer station with more than 15 min to the next train
+  last train's card, also when a walk follows, #541) and "beim Umstieg" under a transfer station with more than 15 min to the next train
   (`JourneyWeather.arrival(of:in:)`), tap → `WeatherDetails` popover with rain, wind and
   the Open-Meteo credit, #385, `WeatherViews.swift`, off with `AppSettings.showWeather`), `JourneyMapView`, `JourneyReplanSheet` (replan mid-journey; keeps all vias of the search but shows and searches only those
   ahead of the picked train's exit, #430; "Halt hinzufügen" via
