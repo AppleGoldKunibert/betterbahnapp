@@ -6205,6 +6205,42 @@ private final class BahnJetztListProtocol: URLProtocol, @unchecked Sendable {
         #expect(part.count == track.count)
     }
 
+    /// The journey map loads track geometry for legs without it (shared journeys, bahn.de) and keeps a leg's own (#573).
+    @Test func journeyMapFillsInMissingTrackGeometry() {
+        let departure = Date(timeIntervalSince1970: 1_790_000_000)
+        func leg(_ from: Station, _ to: Station, minutes: Double, geometry: [Coordinate]? = nil, walking: Bool = false) -> Leg {
+            Leg(origin: from, destination: to, departure: TimeInfo(planned: departure.addingTimeInterval(minutes * 60), actual: nil),
+                arrival: TimeInfo(planned: departure.addingTimeInterval((minutes + 50) * 60), actual: nil),
+                departurePlatform: nil, arrivalPlatform: nil, tripId: walking ? nil : "trip\(minutes)",
+                line: walking ? nil : Line(name: "ICE \(Int(minutes))", number: nil, product: .highSpeed, operatorName: nil),
+                direction: nil, isWalking: walking, cancelled: false, stopovers: [], remarks: [], source: .bahnDe,
+                geometry: geometry)
+        }
+        let koeln = station("8000207", "Köln Hbf", 50.943, 6.958)
+        let duisburg = station("8000086", "Duisburg Hbf", 51.429, 6.776)
+        let hamburg = station("8002549", "Hamburg Hbf", 53.553, 10.007)
+        let track = (0...600).map { Coordinate(latitude: 50.943 + Double($0) * 0.00081, longitude: 6.958 - Double($0) * 0.0003) }
+        let ownTrack = (0...600).map { Coordinate(latitude: 51.429 + Double($0) * 0.0035, longitude: 6.776 + Double($0) * 0.0054) }
+        let straight = [duisburg.coordinate!, hamburg.coordinate!]
+        let journey = Journey(legs: [leg(koeln, duisburg, minutes: 0),
+                                     leg(duisburg, duisburg, minutes: 55, walking: true),
+                                     leg(duisburg, hamburg, minutes: 60, geometry: ownTrack),
+                                     leg(hamburg, koeln, minutes: 300, geometry: straight)],
+                              source: .bahnDe)
+
+        // The walk is never drawn as a track, the leg with its own track needs nothing.
+        #expect(journey.legsWithoutTrackGeometry.map(\.id) == [journey.legs[0].id, journey.legs[3].id])
+
+        let filled = journey.fillingTrackGeometry([journey.legs[0].id: track, journey.legs[2].id: track,
+                                                   journey.legs[3].id: straight])
+        #expect(filled.legs[0].geometry == track)
+        #expect(filled.legs[1].geometry == nil)
+        #expect(filled.legs[2].geometry == ownTrack)
+        // A straight line looked up is no better than the one the leg had.
+        #expect(filled.legs[3].geometry == straight)
+        #expect(filled.legsWithoutTrackGeometry.map(\.id) == [journey.legs[3].id])
+    }
+
     @Test func straightLineBetweenCitiesIsNotTrackGeometry() {
         let straight = [Coordinate(latitude: 50.943, longitude: 6.958), Coordinate(latitude: 52.376, longitude: 9.741)]
         #expect(!RouteGeometryService.followsTracks(straight))

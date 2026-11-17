@@ -136,7 +136,7 @@ in `project.pbxproj`: new files join their target automatically.
   with the legs' cached track geometry; `WeatherLabel` "☀ 18° bei Ankunft" under the destination (summary card and the
   last leg) and "beim Umstieg" under a transfer station with more than 15 min to the next train
   (`JourneyWeather.arrival(of:in:)`), tap → `WeatherDetails` popover with rain, wind and
-  the Open-Meteo credit, #385, `WeatherViews.swift`, off with `AppSettings.showWeather`), `JourneyMapView`, `JourneyReplanSheet` (replan mid-journey; keeps all vias of the search but shows and searches only those
+  the Open-Meteo credit, #385, `WeatherViews.swift`, off with `AppSettings.showWeather`), `JourneyMapView` (legs without track geometry, e.g. bahn.de or shared journeys, are drawn straight until Kit `Journey.fillingTrackGeometry` puts in what `AppModel.geometry(for:)` found, #573), `JourneyReplanSheet` (replan mid-journey; keeps all vias of the search but shows and searches only those
   ahead of the picked train's exit, #430; "Halt hinzufügen" via
   `ManualStopSheet` adds an off-timetable exit, a check-in then becomes a manual trip via
   `AppModel.replaceCheckinWithManualTrip`; a new exit on the last train asks "Reise … beenden" / "Weiter nach …").
@@ -283,7 +283,8 @@ in `project.pbxproj`: new files join their target automatically.
   Kit `PassengerRights` (journey, earlier plans, tickets, BahnCard 100 setting); `notifyPassengerRights` notifies once
   per level after arrival and keeps the worst claim in `SavedJourney.recordedClaim`. Never shows amounts. Fahrkarte
   (#504) draws the card as a small ticket with the percentage large.
-- `Features/Sharing/` – shared-journey and DB-share previews; `JourneyShareButton` (menu: "Reise teilen" short link,
+- `Features/Sharing/` – shared-journey and DB-share previews (`SharedJourneyPreviewView`: tapping the card pushes
+  `JourneyDetailView`, "Auf Karte zeigen" opens `JourneyMapView`, #573); `JourneyShareButton` (menu: "Reise teilen" short link,
   falls back to the long one, `UIActivityViewController`; "Ankunft teilen" #317 adds an `ArrivalShare`, until 2 h after the arrival).
   `.roundActionBackground()` draws its and `CalendarButton`'s 40 pt circle in either design.
 - `Features/Commute/` – regular trips (#397): `RegularTripButton` (↻ next to "Gespeichert") → `RegularTripEditor` (weekdays,

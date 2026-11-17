@@ -9309,6 +9309,16 @@
         }
       }
     },
+    "Zeigt die ganze Reise mit allen Halten" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shows the whole journey with all stops"
+          }
+        }
+      }
+    },
     "Zeigt die Wagenreihung an diesem Halt" : {
       "localizations" : {
         "en" : {

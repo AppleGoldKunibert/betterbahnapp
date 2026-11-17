@@ -83,3 +83,24 @@ public struct RouteGeometryService: Sendable {
         return Polyline.slice(shape, from: start, to: end)
     }
 }
+
+extension Journey {
+    /// Train legs the journey map would draw as a straight line between the stations: shared journeys come
+    /// without track geometry (#568) and bahn.de never sends any (#573).
+    public var legsWithoutTrackGeometry: [Leg] {
+        transitLegs.filter { !RouteGeometryService.followsTracks($0.geometry ?? []) }
+    }
+
+    /// The journey with looked-up track geometry (by `Leg.id`) put onto the legs that have none that follows
+    /// the tracks; a leg's own track geometry is kept.
+    public func fillingTrackGeometry(_ geometries: [String: [Coordinate]]) -> Journey {
+        var journey = self
+        for index in journey.legs.indices {
+            let leg = journey.legs[index]
+            guard !RouteGeometryService.followsTracks(leg.geometry ?? []),
+                  let geometry = geometries[leg.id], RouteGeometryService.followsTracks(geometry) else { continue }
+            journey.legs[index].geometry = geometry
+        }
+        return journey
+    }
+}
