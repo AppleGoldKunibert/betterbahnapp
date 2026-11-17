@@ -6219,8 +6219,14 @@ private final class BahnJetztListProtocol: URLProtocol, @unchecked Sendable {
         let koeln = station("8000207", "Köln Hbf", 50.943, 6.958)
         let duisburg = station("8000086", "Duisburg Hbf", 51.429, 6.776)
         let hamburg = station("8002549", "Hamburg Hbf", 53.553, 10.007)
-        let track = (0...600).map { Coordinate(latitude: 50.943 + Double($0) * 0.00081, longitude: 6.958 - Double($0) * 0.0003) }
-        let ownTrack = (0...600).map { Coordinate(latitude: 51.429 + Double($0) * 0.0035, longitude: 6.776 + Double($0) * 0.0054) }
+        func line(from start: Coordinate, latitudeStep: Double, longitudeStep: Double) -> [Coordinate] {
+            (0...600).map { (index: Int) -> Coordinate in
+                let step = Double(index)
+                return Coordinate(latitude: start.latitude + step * latitudeStep, longitude: start.longitude + step * longitudeStep)
+            }
+        }
+        let track = line(from: koeln.coordinate!, latitudeStep: 0.00081, longitudeStep: -0.0003)
+        let ownTrack = line(from: duisburg.coordinate!, latitudeStep: 0.0035, longitudeStep: 0.0054)
         let straight = [duisburg.coordinate!, hamburg.coordinate!]
         let journey = Journey(legs: [leg(koeln, duisburg, minutes: 0),
                                      leg(duisburg, duisburg, minutes: 55, walking: true),

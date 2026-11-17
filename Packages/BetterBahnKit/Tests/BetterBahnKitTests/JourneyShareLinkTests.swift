@@ -13,10 +13,14 @@ import Testing
     @Test func leavesOutTrackGeometry() throws {
         var journey = Self.journey()
         // About 1,000 km of track, a point every 100 m, wiggling so it doesn't compress away.
-        journey.legs[0].geometry = (0..<10_000).map { index in
-            Coordinate(latitude: 53.55 - Double(index) * 0.0004 + Double(index % 7) * 0.00001,
-                       longitude: 10.0 + Double(index) * 0.00027 + Double(index % 11) * 0.00001)
+        var track: [Coordinate] = []
+        for index in 0..<10_000 {
+            let step = Double(index)
+            let latitude: Double = 53.55 - step * 0.0004 + Double(index % 7) * 0.00001
+            let longitude: Double = 10.0 + step * 0.00027 + Double(index % 11) * 0.00001
+            track.append(Coordinate(latitude: latitude, longitude: longitude))
         }
+        journey.legs[0].geometry = track
         let payload = try #require(JourneyShareLink.payload(for: journey))
         #expect(payload.count <= JourneyShareLink.maxEncodedLength)
         let shared = try #require(JourneyShareLink.journey(fromPayload: payload))
