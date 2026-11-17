@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 @testable import BetterBahnKit
 
@@ -168,5 +169,115 @@ import Testing
         #expect(DBShareImporter.matches("89687", line))
         #expect(DBShareImporter.matches("ICE 1502", Line(name: "ICE 1502", number: "1502", product: .highSpeed, operatorName: nil)))
         #expect(!DBShareImporter.matches("ICE 1502", Line(name: "ICE 1503", number: "1503", product: .highSpeed, operatorName: nil)))
+    }
+}
+
+/// The importer's order for a train the search doesn't find (#578): Transitous' board, then bahn.de's own
+/// timetable, then the share itself. Getting no answer at all is an error rather than a poorer train.
+@Suite struct DBShareImporterFallbackTests {
+    private let recon = "¶HKI¶T$A=1@O=Hamburg Hbf@X=10006909@Y=53552733@L=8002549@a=128@$A=1@O=Berlin Hbf@X=13369549@Y=52525589@L=8098160@a=128@$202612131734$202612131921$RJ            179$$1$$$$$$¶KC¶"
+
+    private func sharedConnection() throws -> SharedConnection {
+        let legs = try #require(DBShare.legs(fromRecon: recon))
+        return SharedConnection(origin: legs[0].origin, destination: legs[0].destination, departure: legs[0].departure,
+                                arrival: legs[0].arrival, legs: legs, firstTrain: legs[0].trainName, lastTrain: legs[0].trainName)
+    }
+
+    /// Transitous (the mock) knows no train at all; bahn.de's answers come from `protocolClass`.
+    private func makeImporter(bahnDe protocolClass: AnyClass, provider: MockProvider = MockProvider(source: .transitous))
+        -> (DBShareImporter, URLSession) {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [protocolClass]
+        let session = URLSession(configuration: configuration)
+        let combined = CombinedProvider(primary: provider, fallback: nil, bahnDe: nil, bahnExpert: nil, vagonweb: nil, bahnJetzt: nil)
+        let bahnDe = BahnDeClient(http: HTTPClient(session: session), gate: BahnDeGate())
+        return (DBShareImporter(provider: combined, bahnDe: bahnDe), session)
+    }
+
+    @Test func takesTrainTransitousLacksFromBahnDe() async throws {
+        let (importer, session) = makeImporter(bahnDe: SharedLegBahnDeProtocol.self)
+        defer { session.invalidateAndCancel() }
+        let journey = try await importer.journey(from: sharedConnection())
+        #expect(journey.legs.count == 1)
+        #expect(journey.legs[0].stopovers.map(\.station.name) == ["Hamburg Hbf", "Berlin-Spandau", "Berlin Hbf"])
+        #expect(journey.legs[0].arrivalPlatform?.planned == "3")
+    }
+
+    @Test func takesTrainAsSharedWhenBahnDeDoesNotListIt() async throws {
+        let (importer, session) = makeImporter(bahnDe: EmptyBoardBahnDeProtocol.self)
+        defer { session.invalidateAndCancel() }
+        let journey = try await importer.journey(from: sharedConnection())
+        #expect(journey.legs.count == 1)
+        #expect(journey.legs[0].line?.name == "RJ 179")
+        #expect(journey.legs[0].stopovers.isEmpty)
+        #expect(journey.legs[0].tripId == nil)
+    }
+
+    @Test func noAnswerIsAnErrorNotAPoorerTrain() async throws {
+        let provider = MockProvider(source: .transitous)
+        provider.failing = true
+        let (importer, session) = makeImporter(bahnDe: UnreachedBahnDeProtocol.self, provider: provider)
+        defer { session.invalidateAndCancel() }
+        let connection = try sharedConnection()
+        await #expect(throws: DBShareError.unreadable) { try await importer.journey(from: connection) }
+        #expect(UnreachedBahnDeProtocol.requests.withLock { $0 } == 0)
+    }
+
+    @Test func toldUnknownFromUnavailable() {
+        #expect(DBShareImporter.isUnavailable(URLError(.notConnectedToInternet)))
+        #expect(DBShareImporter.isUnavailable(CancellationError()))
+        #expect(DBShareImporter.isUnavailable(TransitError.timeout))
+        #expect(DBShareImporter.isUnavailable(TransitError.http(status: 503, body: nil)))
+        #expect(DBShareImporter.isUnavailable(TransitError.http(status: 452, body: nil)))
+        #expect(!DBShareImporter.isUnavailable(TransitError.http(status: 404, body: nil)))
+        #expect(!DBShareImporter.isUnavailable(TransitError.notFound("Fahrt")))
+        #expect(!DBShareImporter.isUnavailable(TransitError.decoding("Board")))
+    }
+}
+
+/// bahn.de with RJ 179 on Hamburg Hbf's board on 13.12.2026 and its journey details.
+private final class SharedLegBahnDeProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func stopLoading() {}
+
+    override func startLoading() {
+        let path = request.url?.path ?? ""
+        let fixture = path.hasSuffix("reiseloesung/abfahrten") ? "bahnde-board-hamburg-rj179"
+            : path.hasSuffix("reiseloesung/fahrt") ? "bahnde-fahrt-rj179" : nil
+        let body = fixture.flatMap { Bundle.module.url(forResource: $0, withExtension: "json", subdirectory: "Fixtures") }
+            .flatMap { try? Data(contentsOf: $0) } ?? Data("{}".utf8)
+        let response = HTTPURLResponse(url: request.url!, statusCode: fixture == nil ? 404 : 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: body)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+}
+
+/// bahn.de whose boards list no train.
+private final class EmptyBoardBahnDeProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func stopLoading() {}
+
+    override func startLoading() {
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(#"{"entries":[]}"#.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+}
+
+/// bahn.de that must not be asked: counts the requests.
+private final class UnreachedBahnDeProtocol: URLProtocol, @unchecked Sendable {
+    static let requests = Mutex(0)
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func stopLoading() {}
+
+    override func startLoading() {
+        Self.requests.withLock { $0 += 1 }
+        client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
     }
 }

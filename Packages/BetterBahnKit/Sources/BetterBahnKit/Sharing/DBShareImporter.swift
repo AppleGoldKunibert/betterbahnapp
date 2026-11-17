@@ -46,7 +46,16 @@ public struct DBShareImporter: Sendable {
         let shared = await locatingStations(of: connection)
 
         if let journey = try? await searched(shared) { return journey }
-        if !shared.legs.isEmpty, let journey = try? await rebuilt(shared) { return journey }
+        if !shared.legs.isEmpty {
+            do {
+                if let journey = try await rebuilt(shared) { return journey }
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                // No answer at all (offline, a server down): worth trying again rather than "not found".
+                throw DBShareError.unreadable
+            }
+        }
         throw DBShareError.notFound
     }
 
@@ -88,9 +97,9 @@ public struct DBShareImporter: Sendable {
     private func rebuilt(_ shared: SharedConnection) async throws -> Journey? {
         var legs: [Leg] = []
         for sharedLeg in shared.legs {
-            if let leg = try? await leg(for: sharedLeg) {
+            if let leg = try await Self.unlessUnknown({ try await self.leg(for: sharedLeg) }) {
                 legs.append(leg)
-            } else if let leg = try? await bahnDe.sharedLeg(sharedLeg) {
+            } else if let leg = try await Self.unlessUnknown({ try await bahnDe.sharedLeg(sharedLeg) }) {
                 legs.append(leg)
             } else if let leg = Self.plainLeg(sharedLeg) {
                 legs.append(leg)
@@ -100,6 +109,29 @@ public struct DBShareImporter: Sendable {
         }
         guard let first = legs.first else { return nil }
         return Journey(legs: legs, source: first.source)
+    }
+
+    /// `work`'s answer, or nil when it failed because the train or station isn't known there. Getting no answer
+    /// at all (offline, a timeout, a server down or blocking, the import cancelled) is thrown instead: a train
+    /// the timetable data does know mustn't be saved in a poorer version just because it didn't answer in time.
+    static func unlessUnknown<T>(_ work: () async throws -> T?) async throws -> T? {
+        do {
+            return try await work()
+        } catch where isUnavailable(error) {
+            throw error
+        } catch {
+            return nil
+        }
+    }
+
+    static func isUnavailable(_ error: Error) -> Bool {
+        if error is CancellationError || error is URLError { return true }
+        guard let error = error as? TransitError else { return false }
+        switch error {
+        case .timeout, .rateLimited, .unauthorized: return true
+        case .http(let status, _): return error.isBlocked || status == 401 || status == 429 || status >= 500
+        case .decoding, .notFound, .invalidInput: return false
+        }
     }
 
     /// `shared` with just what the share says: its two ends and planned times. Only for stations that

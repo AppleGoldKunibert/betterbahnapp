@@ -258,7 +258,8 @@ extension BahnDeClient {
     /// A shared train from bahn.de's own timetable, for when the app's timetable data lacks it (e.g. the first
     /// days of a new timetable year, before DELFI publishes it): found on the departure board where it's
     /// boarded at its planned time, with its stops up to where it's left from bahn.de's journey details.
-    /// `nil` when bahn.de doesn't list it there.
+    /// `nil` when bahn.de doesn't list it there (its board is one page from that minute on, which at a hub is
+    /// still a few minutes' worth, enough for a train leaving at exactly that time).
     func sharedLeg(_ shared: SharedConnection.Leg) async throws -> Leg? {
         guard let eva = try await evaNumber(for: shared.origin) else { return nil }
         let board = try await get(Self.boardURL(eva: eva, at: shared.departure, products: []), as: Board.self)

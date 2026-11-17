@@ -918,7 +918,7 @@ struct LegTripSheet: View {
                 return
             }
             if trip == nil { trip = saved }
-            trip = await model.liveRun.refresh(saved, baseline: trip, wholeRun: false)
+            trip = await model.liveRun.refresh(saved, baseline: trip, wholeRun: false) { partial in trip = partial }
             return
         }
         do {
