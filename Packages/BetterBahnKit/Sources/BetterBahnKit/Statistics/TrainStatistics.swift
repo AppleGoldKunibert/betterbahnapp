@@ -463,7 +463,9 @@ public actor TrainStatisticsStore {
             // Not again right away when bahn.de found none or didn't answer: opening the train again shouldn't wait for it.
             guard let resolve, resolveFailures[station.id].map({ now().timeIntervalSince($0) >= Self.retryAfter }) ?? true else { continue }
             if let eva = await resolve(station), !eva.isEmpty, eva.allSatisfy(\.isNumber) {
-                state.withLock { $0.memory.resolved[station.id] = eva }
+                state.withLock { state in
+                    if state.isEnabled { state.memory.resolved[station.id] = eva }
+                }
                 resolveFailures[station.id] = nil
                 evas[station.id] = eva
             } else {
@@ -505,7 +507,9 @@ public actor TrainStatisticsStore {
         if !missing.isEmpty {
             do {
                 let answers = try await fetcher(missing)
-                state.withLock { state in
+                // Switched off while waiting: the answer isn't kept, in memory or in the file.
+                let kept = state.withLock { state -> Bool in
+                    guard state.isEnabled else { return false }
                     state.begin(today)
                     for query in missing {
                         let key = query.key(day: day)
@@ -515,9 +519,10 @@ public actor TrainStatisticsStore {
                         merged.stops = (state.memory.entries[key]?.stops ?? [:]).merging(answer.stops) { $1 }
                         state.memory.entries[key] = merged
                     }
+                    return true
                 }
                 for query in missing { failures[query.key(day: day)] = nil }
-                writeCache()
+                if kept { writeCache() }
             } catch {
                 for query in missing { failures[query.key(day: day)] = current }
             }
@@ -543,8 +548,10 @@ public actor TrainStatisticsStore {
         }
     }
 
+    /// Does nothing while switched off.
     private func writeCache() {
-        guard let cacheURL, let data = try? JSONEncoder().encode(state.withLock({ $0.memory })) else { return }
+        guard let cacheURL, let memory = state.withLock({ $0.isEnabled ? $0.memory : nil }),
+              let data = try? JSONEncoder().encode(memory) else { return }
         try? data.write(to: cacheURL, options: .atomic)
     }
 }
