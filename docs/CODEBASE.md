@@ -50,7 +50,9 @@ in `project.pbxproj`: new files join their target automatically.
   Unfolded, the Duo gets the iPad's columns (#464): iOS calls an upright phone compact, so
   `phoneColumnsWhenUnfolded` (`Shared/SplitNavigation.swift`, on the `WindowGroup`'s root) measures the window and,
   while Kit `PhoneColumns.fit` (short side at least 600 pt; folded about 466), sets the window scene's
-  `traitOverrides.horizontalSizeClass` to `.regular`, removed again when folded.
+  `traitOverrides.horizontalSizeClass` to `.regular`; windows narrower than 600 pt get `.compact` (Kit
+  `PhoneColumns.width`), since iOS calls a sideways Duo wide also next to another app, where two columns left only
+  the right one without the search (#579); other windows (folded sideways) keep what iOS says.
   In regular width "Verbindungen suchen" sits in a `safeAreaBar` at the bottom of the search column (hard scroll
   edge), since next to a journey the column is often shorter than the form (#487).
   `JourneyDetailView`'s page is `frame(minWidth: 0, maxWidth: .infinity)`: exactly as wide as the scroll view offers,

@@ -120,7 +120,7 @@ struct SplitNavigationView<Sidebar: View, Placeholder: View>: View {
 extension View {
     /// Gives the unfolded iPhone Duo the iPad's columns (#464). iOS calls an upright phone narrow, which keeps
     /// `SplitNavigationStack` and `SplitNavigationView` in one column there: this tells the whole scene, sheets
-    /// included, it is wide while the window fits two columns (Kit `PhoneColumns`).
+    /// included, it is wide while the window fits two columns and narrow while it is too narrow for them (Kit `PhoneColumns`).
     func phoneColumnsWhenUnfolded() -> some View {
         background { PhoneColumnsObserver().accessibilityHidden(true) }
     }
@@ -147,15 +147,23 @@ private struct PhoneColumnsObserver: UIViewRepresentable {
             update()
         }
 
+        /// Narrow windows are told so (#579): iOS calls a sideways Duo wide, also when the app shares the screen with
+        /// another one, and two columns in half the screen left only the right one, without the search.
         private func update() {
             guard UIDevice.current.userInterfaceIdiom == .phone, let window, let scene = window.windowScene else { return }
             let size = window.bounds.size
-            let wide = PhoneColumns.fit(width: size.width, height: size.height)
+            let wanted: UIUserInterfaceSizeClass? = switch PhoneColumns.width(width: size.width, height: size.height) {
+            case .regular: .regular
+            case .compact: .compact
+            case .system: nil
+            }
             let overridden = scene.traitOverrides.contains(UITraitHorizontalSizeClass.self)
             // Only on a change: every override lays the scene out again.
-            if wide, !overridden {
-                scene.traitOverrides.horizontalSizeClass = .regular
-            } else if !wide, overridden {
+            if let wanted {
+                if !overridden || scene.traitOverrides.horizontalSizeClass != wanted {
+                    scene.traitOverrides.horizontalSizeClass = wanted
+                }
+            } else if overridden {
                 scene.traitOverrides.remove(UITraitHorizontalSizeClass.self)
             }
         }
