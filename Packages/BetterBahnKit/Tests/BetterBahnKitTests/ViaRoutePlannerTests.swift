@@ -117,13 +117,14 @@ import Testing
         journeys.compactMap { $0.departure.map { $0.planned.timeIntervalSince(base) / 60 } }
     }
 
-    let via = [ViaWaypoint(station: b)]
+    var via: [ViaWaypoint] { [ViaWaypoint(station: b)] }
     var fourHoursIn: Date { base.addingTimeInterval(4 * 3600) }
 
     @Test func laterRoutesLeaveAfterTheShownOnes() async throws {
         let planner = ViaRoutePlanner(provider: hourlyProvider())
         let shown = try await planner.journeys(from: a, to: c, via: via, date: fourHoursIn)
-        let latest = try #require(departures(shown).max())
+        #expect(!shown.isEmpty)
+        let latest = departures(shown).max() ?? 0
         let later = try await planner.journeys(from: a, to: c, via: via, after: shown)
         #expect(!later.isEmpty)
         #expect(departures(later).allSatisfy { $0 > latest })
@@ -137,7 +138,7 @@ import Testing
         #expect(departures(shown).min() == 250)
         let earlier = try await planner.journeys(from: a, to: c, via: via, before: shown)
         #expect(Set(departures(earlier)) == [190])
-        #expect(Set(earlier.map(\.id)).isDisjoint(with: shown.map(\.id)))
+        #expect(Set(earlier.map { $0.id }).isDisjoint(with: shown.map { $0.id }))
     }
 
     @Test func earlierRoutesLookFurtherBackAfterAGap() async throws {
