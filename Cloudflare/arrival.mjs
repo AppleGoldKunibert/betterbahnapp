@@ -374,9 +374,18 @@ export function unix(local) {
     const match = typeof local === "string" && local.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})/);
     if (!match) return null;
     const asUTC = Date.parse(`${match[1]}:00Z`);
-    const name = berlinOffset.formatToParts(new Date(asUTC)).find(part => part.type === "timeZoneName")?.value ?? "GMT+01:00";
+    if (Number.isNaN(asUTC)) return null;
+    // Berlin is an hour or two ahead of UTC: take the offset at about that moment, then at the result, so
+    // times between 01:00 and 02:00 on the nights the clocks change get the offset of their own side.
+    const guess = asUTC - berlinOffsetAt(asUTC);
+    return asUTC - berlinOffsetAt(guess);
+}
+
+/// How far Berlin is ahead of UTC at `ms`, in milliseconds.
+function berlinOffsetAt(ms) {
+    const name = berlinOffset.formatToParts(new Date(ms)).find(part => part.type === "timeZoneName")?.value ?? "GMT+01:00";
     const [, sign, hours, minutes = "0"] = name.match(/GMT([+-])(\d{2}):?(\d{2})?/) ?? [, "+", "01"];
-    return asUTC - (Number(hours) * 60 + Number(minutes)) * 60000 * (sign === "-" ? -1 : 1);
+    return (Number(hours) * 60 + Number(minutes)) * 60000 * (sign === "-" ? -1 : 1);
 }
 
 // MARK: - Page
