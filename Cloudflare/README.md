@@ -11,9 +11,17 @@ It also stores shared journeys for short links (`https://betterbahn.betterbahn.w
   (`X-BetterBahn-Token`, same `TOKEN_SECRET` as `betterbahn2`); 10 per minute per app install.
 - `GET /share/<id>` → `{ data }` (404 when unknown or expired); 60 per minute per IP.
 - `GET /s/<id>` → the whole journey as a web page for browsers without the app (`journeypage.mjs`: legs with times,
-  delays, platforms and expandable stops, as of sharing; no script, nothing stored), plus "In BetterBahn öffnen" via
-  `betterbahn://share?id=<id>` and the App Store link once `APP_STORE_URL` is set. Data the page can't draw gets a
-  plain "open in the app" page.
+  delays, platforms and expandable stops), plus "In BetterBahn öffnen" via `betterbahn://share?id=<id>` and the
+  App Store link once `APP_STORE_URL` is set. Data the page can't draw gets a plain "open in the app" page. The page
+  shows the state at sharing first and its one script (CSP nonce) asks `GET /share/<id>/live` right away and then
+  every minute while the tab is visible (keeping opened stop lists), until the journey is over.
+- `GET /share/<id>/live` → for a journey link the journey with DB's live times (`journeylive.mjs`): each train that
+  hasn't arrived yet (the next 4 at most) is asked like an arrival page (IRIS per stop, else bahn.de's `fahrt` when
+  the app's data has the journey ID) and its leg times, platforms, stops, cancellation and notices are filled in;
+  a train nobody answers for keeps the shared times. `done` once the last arrival is 30 minutes ago. Nothing runs
+  without a reader (no cron, nothing stored): the answer is reused for 55 s per link (Cache API), so many readers of
+  one link make one round of requests a minute, on top of the 30 s IRIS/bahn.de caches shared by all links. Same
+  read limit (60 per minute per IP) as the other reads.
 - `/.well-known/apple-app-site-association` → Universal Links for `/s/*` (`APP_IDS`), so iOS opens the
   app directly (Associated Domains entitlement in `Config/BetterBahn.entitlements`).
 
@@ -68,7 +76,7 @@ strings because they contain authorization codes.
 
 ## Verify
 
-Run the handler tests with `node --test Cloudflare/traewelling-callback.test.mjs Cloudflare/share.test.mjs Cloudflare/arrival.test.mjs`.
+Run the handler tests with `node --test Cloudflare/traewelling-callback.test.mjs Cloudflare/share.test.mjs Cloudflare/arrival.test.mjs Cloudflare/journeypage.test.mjs Cloudflare/journeylive.test.mjs`.
 After deploying, this synthetic request should return HTTP 302 with
 `Location: betterbahn://oauth?code=test-code&state=test-state`:
 
