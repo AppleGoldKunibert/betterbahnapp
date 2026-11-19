@@ -98,12 +98,25 @@ export function extendedExpiry(entry, view) {
 /// What the page shows: the stored arrival with DB's live times from IRIS, else from bahn.de where it has the train.
 export async function arrivalView(arrival, expiresAt, deps = {}) {
     const now = deps.now ?? Date.now();
+    const { stops, live, messages } = await liveTrain(arrival, { ...deps, now });
+    const boarding = stops[0];
+    return {
+        train: arrival.train, product: arrival.product, color: arrival.color, live,
+        from: { name: boarding.name, dep: boarding.dep, depRt: boarding.depRt },
+        stops: shownStops(stops, now), messages: messages.slice(0, 2), updatedAt: now, expiresAt,
+    };
+}
+
+/// The train's stops with DB's live times: from IRIS where it has the train (only the stops near the next one
+/// and the destination are asked, the others keep the app's times), else bahn.de's section of the same stops.
+/// `live` is false (and `stops` the app's) when neither knows the train. `deps.now` is required.
+export async function liveTrain(arrival, deps) {
     let stops = arrival.stops;
     let live = false;
     let messages = [];
     let fromIris = null;
     try {
-        fromIris = await irisStops(arrival, { ...deps, now });
+        fromIris = await irisStops(arrival, deps);
     } catch {
         // Logged in `fetchCached`; bahn.de is asked instead.
     }
@@ -113,23 +126,18 @@ export async function arrivalView(arrival, expiresAt, deps = {}) {
         live = destination.arrRt !== null || destination.cancelled;
     } else if (arrival.journeyId && deps.proxyURL && deps.secret) {
         try {
-            const details = await journeyDetails(arrival.journeyId, { ...deps, now });
+            const details = await journeyDetails(arrival.journeyId, deps);
             const section = details ? liveSection(liveStops(details), arrival.stops) : null;
             if (section) {
                 stops = section;
                 live = true;
-                messages = journeyMessages(details).slice(0, 2);
+                messages = journeyMessages(details);
             }
         } catch {
             // Our server or bahn.de down or refusing: the page shows the app's times until the next refresh.
         }
     }
-    const boarding = stops[0];
-    return {
-        train: arrival.train, product: arrival.product, color: arrival.color, live,
-        from: { name: boarding.name, dep: boarding.dep, depRt: boarding.depRt },
-        stops: shownStops(stops, now), messages, updatedAt: now, expiresAt,
-    };
+    return { stops, live, messages };
 }
 
 /// The first stop the train hasn't left yet (the destination: not arrived at), by the best time known; -1 after
@@ -358,7 +366,7 @@ export function liveSection(liveStops, shared) {
     return liveStops.slice(start, end + 1);
 }
 
-function sameStation(liveStop, sharedStop) {
+export function sameStation(liveStop, sharedStop) {
     if (sharedStop.eva && liveStop.eva) return liveStop.eva === sharedStop.eva;
     return normalized(liveStop.name) === normalized(sharedStop.name);
 }
