@@ -10,8 +10,10 @@ It also stores shared journeys for short links (`https://betterbahn.betterbahn.w
 - `POST /share { data }` → `201 { id, url, expiresAt }`. Needs an App Attest token
   (`X-BetterBahn-Token`, same `TOKEN_SECRET` as `betterbahn2`); 10 per minute per app install.
 - `GET /share/<id>` → `{ data }` (404 when unknown or expired); 60 per minute per IP.
-- `GET /s/<id>` → fallback page for browsers without the app ("In BetterBahn öffnen" via
-  `betterbahn://share?id=<id>`, App Store link once `APP_STORE_URL` is set).
+- `GET /s/<id>` → the whole journey as a web page for browsers without the app (`journeypage.mjs`: legs with times,
+  delays, platforms and expandable stops, as of sharing; no script, nothing stored), plus "In BetterBahn öffnen" via
+  `betterbahn://share?id=<id>` and the App Store link once `APP_STORE_URL` is set. Data the page can't draw gets a
+  plain "open in the app" page.
 - `/.well-known/apple-app-site-association` → Universal Links for `/s/*` (`APP_IDS`), so iOS opens the
   app directly (Associated Domains entitlement in `Config/BetterBahn.entitlements`).
 
