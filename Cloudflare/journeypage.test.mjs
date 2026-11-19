@@ -147,8 +147,13 @@ test("/s/<id> shows the journey for a stored share and keeps the plain page for 
 
     const page = await worker.fetch(new Request(`${origin}/s/Ab3xK9zz`), environment);
     assert.equal(page.status, 200);
-    assert.equal(page.headers.get("Content-Security-Policy"), "default-src 'none'; style-src 'unsafe-inline'");
-    assert.match(await page.text(), /Wolfsburg Hbf/);
+    // One script, for the refresh from /share/<id>/live; nothing else may run.
+    assert.match(page.headers.get("Content-Security-Policy"),
+        /^default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-[A-Za-z0-9]{8}'; connect-src 'self'$/);
+    const html = await page.text();
+    assert.match(html, /Wolfsburg Hbf/);
+    assert.match(html, /Stand: Zeitpunkt des Teilens\./);
+    assert.match(html, /fetch\("\/share\/Ab3xK9zz\/live"/);
 
     const plain = await worker.fetch(new Request(`${origin}/s/Cd4yL0aa`), environment);
     assert.equal(plain.status, 200);
