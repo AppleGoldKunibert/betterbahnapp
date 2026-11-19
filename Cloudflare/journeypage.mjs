@@ -1,7 +1,8 @@
 // A shared journey (`/s/<id>`) for people without the app: the Worker reads the stored payload (what the app's
 // `JourneyShareLink.payload(for:)` writes: the `Journey` as JSON, raw-deflate compressed, base64url) when the
 // page is asked for and draws the whole journey as a small version of the app's journey view: every leg with
-// times, delays, platforms and its stops. Nothing is stored or sent anywhere else; the page needs no script.
+// times, delays, platforms and its stops. That is the state at sharing; the open page then asks
+// `/share/<id>/live` every minute (`journeylive.mjs` puts DB's live times into the same view). Nothing is stored.
 //
 // Dates in that JSON are Apple's `Date` default: seconds since 2001-01-01 UTC.
 
@@ -77,6 +78,16 @@ function platform(info) {
     return planned || actual ? { planned, actual } : null;
 }
 
+const EVA_PATTERN = /^\d{6,9}$/;
+
+/// The station's EVA number (what IRIS is asked by): bahn.de's station IDs are EVA numbers.
+function evaOf(station) {
+    const eva = text(station?.evaNumber);
+    if (eva && EVA_PATTERN.test(eva)) return eva;
+    const id = text(station?.id);
+    return station?.source === "bahnDe" && id && EVA_PATTERN.test(id) ? id : null;
+}
+
 /// The feed's color for an S-Bahn or U-Bahn line, as in the app (`Line.lineColorHex`): not for other trains,
 /// and not when white text would be hard to read on it.
 function lineColor(line) {
@@ -106,6 +117,7 @@ export function journeyView(journey) {
             if (!name) return [];
             return [{
                 name,
+                eva: evaOf(stop.station),
                 arrival: time(stop.arrival),
                 departure: time(stop.departure),
                 arrivalPlatform: platform(stop.arrivalPlatform),
@@ -116,6 +128,9 @@ export function journeyView(journey) {
         });
         legs.push({
             origin, destination, departure, arrival,
+            originEva: evaOf(leg.origin), destinationEva: evaOf(leg.destination),
+            number: text(leg.line?.tripNumber) ?? text(leg.line?.number),
+            tripId: text(leg.tripId),
             departurePlatform: platform(leg.departurePlatform),
             arrivalPlatform: platform(leg.arrivalPlatform),
             line: text(leg.line?.name),
@@ -138,72 +153,80 @@ const escape = value => String(value ?? "").replace(/[&<>"']/g,
     c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const clock = new Intl.DateTimeFormat("de-DE", { timeZone: "Europe/Berlin", hour: "2-digit", minute: "2-digit" });
 const dayFormat = new Intl.DateTimeFormat("de-DE", { timeZone: "Europe/Berlin", weekday: "long", day: "numeric", month: "long" });
-const dayKey = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Berlin" });
 const hhmm = value => clock.format(new Date(value));
-
-const PRODUCT_COLORS = {
-    regionalExpress: "#db1730", regional: "#db1730", suburban: "#1a994d", subway: "#1f61cc", tram: "#cc731a",
-    bus: "#8547bd", coach: "#8547bd", ferry: "#1a8ccc", other: "#8e8e93",
-};
-
 const best = info => info.actual ?? info.planned;
-const delayOf = info => info.actual === null ? null : Math.round((info.actual - info.planned) / 60000);
-const tone = minutes => minutes === null || minutes <= 0 ? "ontime" : minutes > 10 ? "heavy" : minutes > 5 ? "slight" : "ontime";
 
 export function durationText(minutes) {
     if (minutes < 60) return `${minutes} Min.`;
     return `${Math.floor(minutes / 60)} Std.${minutes % 60 ? ` ${minutes % 60} Min.` : ""}`;
 }
 
-function timeCell(info, className = "") {
-    const delay = delayOf(info);
-    if (delay === null || delay === 0) return `<span class="t ${className}">${hhmm(info.planned)}</span>`;
-    return `<span class="t ${className}"><span class="${tone(delay)}">${hhmm(info.actual)}</span> <s>${hhmm(info.planned)}</s></span>`;
-}
+/// The page's content for `view`. Runs on the Worker for the first answer and in the browser (as its source
+/// text) for every refresh, so it must not use anything from outside its own body.
+export function renderJourney(view) {
+    const escape = value => String(value ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+    const clock = new Intl.DateTimeFormat("de-DE", { timeZone: "Europe/Berlin", hour: "2-digit", minute: "2-digit" });
+    const dayFormat = new Intl.DateTimeFormat("de-DE", { timeZone: "Europe/Berlin", weekday: "long", day: "numeric", month: "long" });
+    const dayKey = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Berlin" });
+    const hhmm = value => clock.format(new Date(value));
+    const productColors = {
+        regionalExpress: "#db1730", regional: "#db1730", suburban: "#1a994d", subway: "#1f61cc", tram: "#cc731a",
+        bus: "#8547bd", coach: "#8547bd", ferry: "#1a8ccc", other: "#8e8e93",
+    };
+    const best = info => info.actual ?? info.planned;
+    const delayOf = info => info.actual === null ? null : Math.round((info.actual - info.planned) / 60000);
+    const tone = minutes => minutes === null || minutes <= 0 ? "ontime" : minutes > 10 ? "heavy" : minutes > 5 ? "slight" : "ontime";
+    const durationText = minutes => minutes < 60 ? `${minutes} Min.`
+        : `${Math.floor(minutes / 60)} Std.${minutes % 60 ? ` ${minutes % 60} Min.` : ""}`;
 
-function platformText(info) {
-    if (!info) return "";
-    const now = info.actual ?? info.planned;
-    const moved = info.actual && info.planned && info.actual !== info.planned;
-    return `<span class="gl${moved ? " moved" : ""}">Gl. ${escape(now)}</span>`;
-}
+    const timeCell = (info, className = "") => {
+        const delay = delayOf(info);
+        if (delay === null || delay === 0) return `<span class="t ${className}">${hhmm(info.planned)}</span>`;
+        return `<span class="t ${className}"><span class="${tone(delay)}">${hhmm(info.actual)}</span> <s>${hhmm(info.planned)}</s></span>`;
+    };
 
-function badge(leg) {
-    const name = escape(leg.line ?? "Zug");
-    const color = leg.color !== null ? `#${leg.color.toString(16).padStart(6, "0")}`
-        : PRODUCT_COLORS[leg.product] ?? "var(--long-distance)";
-    return `<span class="line" style="background:${color}">${name}</span>`;
-}
+    const platformText = info => {
+        if (!info) return "";
+        const now = info.actual ?? info.planned;
+        const moved = info.actual && info.planned && info.actual !== info.planned;
+        return `<span class="gl${moved ? " moved" : ""}">Gl. ${escape(now)}</span>`;
+    };
 
-function stopsList(leg) {
-    // The first and last stop repeat the leg's own times (when the stops include them): the ones in between expand.
-    let between = leg.stops;
-    if (between[0]?.name === leg.origin) between = between.slice(1);
-    if (between[between.length - 1]?.name === leg.destination) between = between.slice(0, -1);
-    if (between.length === 0) return "";
-    const rows = between.map(stop => {
-        const info = stop.arrival ?? stop.departure;
-        const platformInfo = stop.arrivalPlatform ?? stop.departurePlatform;
-        const through = stop.access === "passThrough";
-        return `<li class="${stop.cancelled ? "cancelled" : ""}${through ? " through" : ""}">${info ? timeCell(info) : `<span class="t"></span>`}`
-            + `<span class="name">${escape(stop.name)}</span>${platformText(platformInfo)}</li>`;
-    }).join("");
-    const label = between.length === 1 ? "1 Halt" : `${between.length} Halte`;
-    return `<details class="stops"><summary>${label}</summary><ol>${rows}</ol></details>`;
-}
+    const badge = leg => {
+        const color = leg.color !== null ? `#${leg.color.toString(16).padStart(6, "0")}`
+            : productColors[leg.product] ?? "var(--long-distance)";
+        return `<span class="line" style="background:${color}">${escape(leg.line ?? "Zug")}</span>`;
+    };
 
-function renderLeg(leg, next) {
-    const gap = next ? Math.round((best(next.departure) - best(leg.arrival)) / 60000) : null;
-    const transfer = gap === null || next.walking || leg.walking ? ""
-        : gap < 0 ? `<p class="transfer heavy">Anschluss nicht erreichbar</p>`
-            : `<p class="transfer${gap < 5 ? " tight" : ""}">Umstieg: ${durationText(gap)}</p>`;
-    if (leg.walking) {
-        const minutes = Math.max(1, Math.round((best(leg.arrival) - best(leg.departure)) / 60000));
-        return `<section class="walk"><span>Fußweg von ${escape(leg.origin)} nach ${escape(leg.destination)} · ${durationText(minutes)}</span></section>${transfer}`;
-    }
-    const messages = leg.messages.map(m => `<p class="note">${escape(m)}</p>`).join("");
-    const direction = leg.direction ? `<span class="direction">Richtung ${escape(leg.direction)}</span>` : "";
-    return `<section class="card${leg.cancelled ? " cancelled" : ""}">
+    const stopsList = leg => {
+        // The first and last stop repeat the leg's own times (when the stops include them): the ones in between expand.
+        let between = leg.stops;
+        if (between[0]?.name === leg.origin) between = between.slice(1);
+        if (between[between.length - 1]?.name === leg.destination) between = between.slice(0, -1);
+        if (between.length === 0) return "";
+        const rows = between.map(stop => {
+            const info = stop.arrival ?? stop.departure;
+            const platformInfo = stop.arrivalPlatform ?? stop.departurePlatform;
+            const through = stop.access === "passThrough";
+            return `<li class="${stop.cancelled ? "cancelled" : ""}${through ? " through" : ""}">${info ? timeCell(info) : `<span class="t"></span>`}`
+                + `<span class="name">${escape(stop.name)}</span>${platformText(platformInfo)}</li>`;
+        }).join("");
+        const label = between.length === 1 ? "1 Halt" : `${between.length} Halte`;
+        return `<details class="stops"><summary>${label}</summary><ol>${rows}</ol></details>`;
+    };
+
+    const renderLeg = (leg, next) => {
+        const gap = next ? Math.round((best(next.departure) - best(leg.arrival)) / 60000) : null;
+        const transfer = gap === null || next.walking || leg.walking ? ""
+            : gap < 0 ? `<p class="transfer heavy">Anschluss nicht erreichbar</p>`
+                : `<p class="transfer${gap < 5 ? " tight" : ""}">Umstieg: ${durationText(gap)}</p>`;
+        if (leg.walking) {
+            const minutes = Math.max(1, Math.round((best(leg.arrival) - best(leg.departure)) / 60000));
+            return `<section class="walk"><span>Fußweg von ${escape(leg.origin)} nach ${escape(leg.destination)} · ${durationText(minutes)}</span></section>${transfer}`;
+        }
+        const messages = leg.messages.map(m => `<p class="note">${escape(m)}</p>`).join("");
+        const direction = leg.direction ? `<span class="direction">Richtung ${escape(leg.direction)}</span>` : "";
+        return `<section class="card${leg.cancelled ? " cancelled" : ""}">
 <p class="train">${badge(leg)}${direction}</p>
 ${leg.cancelled ? `<p class="pill heavy">Fällt aus</p>` : ""}
 <div class="ends">
@@ -213,9 +236,8 @@ ${stopsList(leg)}
 </div>
 ${messages}
 </section>${transfer}`;
-}
+    };
 
-export function renderJourney(view) {
     const legs = view.legs;
     const first = legs[0];
     const last = legs[legs.length - 1];
@@ -226,21 +248,53 @@ export function renderJourney(view) {
     const nextDay = dayKey.format(new Date(best(last.arrival))) !== dayKey.format(new Date(best(first.departure)));
     const summary = `${durationText(minutes)} · ${transfers === 0 ? "direkt" : transfers === 1 ? "1 Umstieg" : `${transfers} Umstiege`}`;
     const body = legs.map((leg, index) => renderLeg(leg, legs[index + 1])).join("");
+    const source = view.live ? `Live-Daten der Deutschen Bahn · Stand ${hhmm(view.updatedAt)}` : "Stand: Zeitpunkt des Teilens.";
     return `<section class="hero">
 <p class="eyebrow">${escape(day)}</p>
 <h1>${escape(first.origin)} → ${escape(last.destination)}</h1>
 <p class="summary">${hhmm(best(first.departure))} – ${hhmm(best(last.arrival))}${nextDay ? " (+1 Tag)" : ""} · ${escape(summary)}</p>
 </section>
-${body}`;
+${body}
+<p class="meta">${source}</p>`;
 }
 
-/// The page for a journey: the journey itself, the way into the app and the store link.
-export function journeyPageHTML(id, view, { style, footer, appStoreURL }) {
+/// How often the open page asks for new times, in seconds.
+export const REFRESH_SECONDS = 60;
+
+/// The page for a journey: the journey itself, the way into the app and the store link. The script asks
+/// `/share/<id>/live` every minute while the page is visible; without script the page stays as shared.
+export function journeyPageHTML(id, view, { style, footer, appStoreURL, nonce }) {
     const first = view.legs[0];
     const last = view.legs[view.legs.length - 1];
     const route = `${first.origin} → ${last.destination}`;
     const store = appStoreURL
         ? `<a class="button secondary" href="${escape(appStoreURL)}">BetterBahn im App Store</a>` : "";
+    const script = nonce ? `<script nonce="${nonce}">
+(() => {
+    const render = ${renderJourney.toString()};
+    const box = document.getElementById("journey");
+    let timer = null;
+    const draw = view => {
+        // A redraw keeps the stop lists the reader opened.
+        const open = [...box.querySelectorAll("details")].map(details => details.open);
+        box.innerHTML = render(view);
+        box.querySelectorAll("details").forEach((details, index) => { details.open = open[index] === true; });
+    };
+    async function refresh() {
+        if (document.hidden) return;
+        try {
+            const response = await fetch("/share/${id}/live", { cache: "no-store" });
+            if (!response.ok) return;
+            const view = await response.json();
+            draw(view);
+            if (view.done && timer) { clearInterval(timer); timer = null; }
+        } catch {}
+    }
+    refresh();
+    timer = setInterval(refresh, ${REFRESH_SECONDS * 1000});
+    document.addEventListener("visibilitychange", refresh);
+})();
+</script>` : "";
     return `<!doctype html>
 <html lang="de">
 <head>
@@ -259,14 +313,14 @@ ${style}
 <body>
 <main>
 <p class="brand">BetterBahn</p>
-${renderJourney(view)}
-<p class="meta">Stand: Zeitpunkt des Teilens.</p>
+<div id="journey">${renderJourney(view)}</div>
 <div class="actions"><a class="button" href="betterbahn://share?id=${id}">In BetterBahn öffnen</a>${store}</div>
 <footer class="foot">
 <p>Mit BetterBahn auf dem iPhone siehst du die Reise live und kannst sie speichern.</p>
 ${footer}
 </footer>
 </main>
+${script}
 </body>
 </html>
 `;
