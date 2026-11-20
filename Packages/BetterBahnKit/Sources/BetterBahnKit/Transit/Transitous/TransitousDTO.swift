@@ -88,7 +88,7 @@ struct MPlace: Decodable {
     /// The platform as `PlatformInfo`; `actual` only when `realtime` is set. For a train (`isRail`)
     /// a bus bay's letter (`isBusBay`) and a stop's own number (`hasStopNumberAsTrack`) are dropped,
     /// so DB's own Timetables schedule can fill in the real track instead (see
-    /// `TimetablesClient.fillMissingPlatforms`) rather than showing a wrong one. A numbered live track
+    /// `OpenBoardsClient.fillMissingPlatforms`) rather than showing a wrong one. A numbered live track
     /// other than it stays: DB's live data puts the real one there (Siegburg/Bonn "80" -> "3", Minden
     /// "93" -> "11", Koblenz Hbf "D" -> "4"), not as a platform change.
     func platform(isRail: Bool, realtime: Bool = true) -> PlatformInfo {

@@ -3,10 +3,10 @@ import Testing
 @testable import BetterBahnKit
 
 /// The departure board shows what bahn.de and Transitous say, and they show a train that runs early as on
-/// time. `applyingRealtime(to:at:)` lays DB Timetables' own data over it, as the stop lists do.
+/// time. `applyingRealtime(to:at:)` lays DB OpenBoards' own data over it, as the stop lists do.
 struct BoardRealtimeTests {
     let berlin = station("8011160", "Berlin Hbf", source: .bahnDe)
-    // 2027-01-15 08:00 UTC == 09:00 Europe/Berlin (CET) -> IRIS "2701150900".
+    // 2027-01-15 08:00 UTC == 09:00 Europe/Berlin (CET).
     let planned = Date(timeIntervalSince1970: 1_800_000_000)
     var now: Date { planned.addingTimeInterval(-10 * 60) }
 
@@ -18,14 +18,14 @@ struct BoardRealtimeTests {
                    platform: platform, cancelled: false, terminatesOrOriginatesHere: nil, remarks: [], source: .transitous)
     }
 
-    func timetables(failing: Bool = false) -> (TimetablesClient, URLSession) {
+    func timetables(failing: Bool = false) -> (OpenBoardsClient, URLSession) {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [failing ? BoardRealtimeFailingProtocol.self : BoardRealtimeProtocol.self]
         let session = URLSession(configuration: config)
-        return (TimetablesClient(http: HTTPClient(session: session)), session)
+        return (OpenBoardsClient(http: HTTPClient(session: session)), session)
     }
 
-    @Test func dbTimetablesWinsOverBahnDeAndTransitous() async {
+    @Test func dbOpenBoardsWinsOverBahnDeAndTransitous() async {
         let (client, session) = timetables()
         defer { session.invalidateAndCancel() }
         let board = [
@@ -33,7 +33,7 @@ struct BoardRealtimeTests {
             entry("ICE", "555", actual: 7),           // bahn.de: +7, DB: +19
             entry("RE", "3121", product: .regional),  // DB: cancelled
             entry("IC", "2000", platform: PlatformInfo(planned: "5", actual: nil)), // DB lists no change: on time
-            entry("ICE", "999", actual: 3),           // not in DB's plan: stays as it was
+            entry("ICE", "999", actual: 3),           // not on DB's board: stays as it was
         ]
 
         let live = await client.applyingRealtime(to: board, at: berlin, now: now)
@@ -55,7 +55,7 @@ struct BoardRealtimeTests {
         #expect(live[0].platform == PlatformInfo(planned: "5", actual: "9"))
     }
 
-    @Test func withoutFchgTheBoardStaysAsItWas() async {
+    @Test func withoutABoardTheBoardStaysAsItWas() async {
         let (client, session) = timetables(failing: true)
         defer { session.invalidateAndCancel() }
         let board = [entry("ICE", "1162", actual: 0), entry("ICE", "555", actual: 7)]
@@ -75,45 +75,26 @@ struct BoardRealtimeTests {
     }
 }
 
-private class BoardRealtimeProtocol: URLProtocol, @unchecked Sendable {
-    class var fchgStatus: Int { 200 }
+private class BoardRealtimeProtocol: OpenBoardsProtocol, @unchecked Sendable {
+    class var status: Int { 200 }
 
-    override class func canInit(with request: URLRequest) -> Bool { true }
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func startLoading() {
-        let path = request.url!.path
-        var status = 200
-        let body: Data
-        if path.contains("plan/") {
-            body = Data("""
-            <timetable station='Berlin Hbf'>
-              <s id="a"><tl c="ICE" n="1162"/><dp pt="2701150900" pp="5"/></s>
-              <s id="b"><tl c="ICE" n="555"/><dp pt="2701150900" pp="5"/></s>
-              <s id="c"><tl c="RE" n="3121"/><dp pt="2701150900" pp="5"/></s>
-              <s id="d"><tl c="IC" n="2000"/><dp pt="2701150900" pp="5"/></s>
-            </timetable>
-            """.utf8)
-        } else if path.contains("fchg/") {
-            status = type(of: self).fchgStatus
-            body = Data("""
-            <timetable station='Berlin Hbf'>
-              <s id="a"><dp ct="2701150850"/></s>
-              <s id="b"><dp ct="2701150919" cp="9"/></s>
-              <s id="c"><dp cs="c"/></s>
-            </timetable>
-            """.utf8)
-        } else {
-            body = Data("<timetable></timetable>".utf8)
+    override class func answer(_ side: BoardSide, evas: [String], url: URL) -> (Int, String) {
+        guard status == 200 else { return (status, "") }
+        guard side == .departure, evas.contains("8011160") else { return super.answer(side, evas: evas, url: url) }
+        func item(_ category: String, _ number: Int, live: String? = nil, platform: String? = nil, cancelled: Bool = false) -> [String: Any] {
+            OpenBoardsJSON.item(.departure, category, number, at: "2027-01-15T09:00:00+01:00", live: live, platformSchedule: "5",
+                                platform: platform, cancelled: cancelled)
         }
-        let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: body)
-        client?.urlProtocolDidFinishLoading(self)
+        return (200, OpenBoardsJSON.board(side, [
+            item("ICE", 1162, live: "2027-01-15T08:50:00+01:00"),
+            item("ICE", 555, live: "2027-01-15T09:19:00+01:00", platform: "9"),
+            item("RE", 3121, cancelled: true),
+            item("IC", 2000),
+        ]))
     }
-    override func stopLoading() {}
 }
 
-/// Same schedule, but `fchg` is down.
-private final class BoardRealtimeFailingProtocol: BoardRealtimeProtocol {
-    override class var fchgStatus: Int { 503 }
+/// Same board, but DB's answer is an error.
+private final class BoardRealtimeFailingProtocol: BoardRealtimeProtocol, @unchecked Sendable {
+    override class var status: Int { 503 }
 }

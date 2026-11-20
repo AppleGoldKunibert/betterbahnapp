@@ -92,6 +92,6 @@ public struct RegularTripPlanner: Sendable {
 
     static func sameRun(_ a: Line?, _ b: Line?) -> Bool {
         guard let first = a?.dispatchNumber, let second = b?.dispatchNumber else { return false }
-        return TimetablesClient.category(from: a?.name ?? "") == TimetablesClient.category(from: b?.name ?? "") && first == second
+        return OpenBoardsClient.category(from: a?.name ?? "") == OpenBoardsClient.category(from: b?.name ?? "") && first == second
     }
 }

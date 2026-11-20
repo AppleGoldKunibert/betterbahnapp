@@ -163,7 +163,7 @@ extension BahnDeClient {
     // MARK: Journey stops
 
     /// The realtime stop sequence for `leg`'s train, including any Zusatzhalt (unscheduled stop) or
-    /// stop it skipped — data Transitous doesn't carry at all (see `TimetablesClient` for the same gap
+    /// stop it skipped — data Transitous doesn't carry at all (see `OpenBoardsClient` for the same gap
     /// on delays/platforms) since it only ever has the planned schedule. `nil` if `leg`'s train is
     /// neither a DB long-distance train nor a regional train with a run number (`journeyReference`);
     /// throws `TransitError.notFound` if bahn.de doesn't list it.
@@ -368,7 +368,7 @@ extension BahnDeClient {
     }
 
     private static let journeyCourseCache = ExpiringCache<JourneyCourse>()
-    /// Matches `TimetablesClient.changesMaxAge`: short enough that a realtime refresh still sees
+    /// Matches `OpenBoardsClient.changesMaxAge`: short enough that a realtime refresh still sees
     /// changes soon, long enough that reopening the same view right after doesn't wait again.
     public static let journeyStopsMaxAge: TimeInterval = 4 * 60
 
@@ -1090,7 +1090,7 @@ extension BahnDeClient {
 
     private static func expertTimes(for line: Line?, day: String, referee: BahnExpertClient?) async -> ExpertTimes? {
         guard let referee, let line, let number = line.dispatchNumber.flatMap({ Int($0) }) else { return nil }
-        return await ExpertTimesCache.shared.times(category: TimetablesClient.category(from: line.name), number: number,
+        return await ExpertTimesCache.shared.times(category: OpenBoardsClient.category(from: line.name), number: number,
                                                     day: day, using: referee)
     }
 

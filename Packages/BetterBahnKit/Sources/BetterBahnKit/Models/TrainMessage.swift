@@ -2,7 +2,7 @@ import Foundation
 
 /// A note about a train as DB Navigator shows it under "Aktuelle Informationen", e.g. "10:10 Keine
 /// behindertengerechte Einrichtung" or "12:10 Reparatur an einem Signal". Comes from the message
-/// codes in DB's own dispatching feed (see `TimetablesClient`).
+/// codes in DB's own dispatching feed (see `OpenBoardsClient`).
 public struct TrainMessage: Codable, Sendable, Hashable, Identifiable {
     public enum Kind: String, Codable, Sendable {
         /// Why the train is late ("Verspätungsgrund").

@@ -113,12 +113,12 @@ public extension Journey {
 }
 
 /// Updates the times, platforms and cancellations of a journey from current trip data, optionally
-/// overlaid with fresher data straight from DB (see `TimetablesClient`) for legs where that helps.
+/// overlaid with fresher data straight from DB (see `OpenBoardsClient`) for legs where that helps.
 public struct JourneyRefresher: Sendable {
     let provider: CombinedProvider
-    let timetables: TimetablesClient?
+    let timetables: OpenBoardsClient?
 
-    public init(provider: CombinedProvider, timetables: TimetablesClient? = nil) {
+    public init(provider: CombinedProvider, timetables: OpenBoardsClient? = nil) {
         self.provider = provider
         self.timetables = timetables
     }
@@ -194,7 +194,7 @@ public struct JourneyRefresher: Sendable {
             leg = Self.apply(trip, to: leg)
             if let beyond = await provider.directionBeyondBorder(of: trip, deadline: .seconds(3)) { leg.direction = beyond }
         }
-        let timetables = TimetablesClient.knowsChanges(until: leg.arrival.planned, now: now) ? self.timetables : nil
+        let timetables = OpenBoardsClient.knowsChanges(until: leg.arrival.planned, now: now) ? self.timetables : nil
         // DB Timetables wins wherever it knows the stop; the trip data above only fills in
         // what DB can't match (regional operators, far-off stops).
         if let timetables, let override = await timetables.realtime(for: leg, now: now) {
@@ -338,11 +338,11 @@ public struct JourneyRefresher: Sendable {
         return leg
     }
 
-    /// Journeys saved before `TimetablesClient.infersOnTime` carry DB's made-up "on time" for trains
+    /// Journeys saved before `OpenBoardsClient.infersOnTime` carry DB's made-up "on time" for trains
     /// hours ahead (actual == planned), which `keepingActual` would keep forever. Dropped while the
     /// train is still that far off; a real live time comes back from the trip or DB below.
     static func droppingInferredOnTime(_ leg: Leg, now: Date) -> Leg {
-        guard !TimetablesClient.infersOnTime(departing: leg.departure.planned, now: now) else { return leg }
+        guard !OpenBoardsClient.infersOnTime(departing: leg.departure.planned, now: now) else { return leg }
         func dropped(_ time: TimeInfo?) -> TimeInfo? {
             guard var time, time.actual == time.planned else { return time }
             time.actual = nil
@@ -384,7 +384,7 @@ public struct JourneyRefresher: Sendable {
         return abs(planned.timeIntervalSince(time))
     }
 
-    static func apply(_ override: TimetablesLegOverride, to leg: Leg) -> Leg {
+    static func apply(_ override: OpenBoardsLegOverride, to leg: Leg) -> Leg {
         var leg = leg
         if let departure = override.departure { leg.departure = departure }
         if let departurePlatform = override.departurePlatform { leg.departurePlatform = departurePlatform }

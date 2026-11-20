@@ -818,7 +818,7 @@ struct JourneyResultsView: View {
     }
 
     private func fillMissingPlatforms(in loaded: [Journey]) async {
-        guard let timetables = model.timetablesClient else { return }
+        guard let timetables = model.openBoardsClient else { return }
         await withTaskGroup(of: Journey?.self) { group in
             for journey in loaded where journey.transitLegs.contains(where: {
                 $0.departurePlatform?.best == nil || $0.arrivalPlatform?.best == nil

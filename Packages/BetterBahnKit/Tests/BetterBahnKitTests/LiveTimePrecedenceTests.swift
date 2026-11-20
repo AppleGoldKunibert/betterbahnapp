@@ -2,9 +2,9 @@ import Foundation
 import Testing
 @testable import BetterBahnKit
 
-/// bahn.de's journey details overlay the times DB Timetables gave, but not a delay DB Timetables already
+/// bahn.de's journey details overlay the times DB OpenBoards gave, but not a delay DB OpenBoards already
 /// put on a stop: for RE 3 3354 (9 Oct 2026) bahn.de had +7 at Gesundbrunnen and ±0 at the end, where
-/// DB Timetables (and bahn.expert) had +19 and +7.
+/// DB OpenBoards (and bahn.expert) had +19 and +7.
 struct LiveTimePrecedenceTests {
     let now = Date(timeIntervalSince1970: 1_790_000_000)
 
@@ -25,12 +25,12 @@ struct LiveTimePrecedenceTests {
         stopovers.map { $0.departure?.delayMinutes }
     }
 
-    @Test func aDelayFromDBTimetablesStaysWhenBahnDeDiffers() {
+    @Test func aDelayFromDBOpenBoardsStaysWhenBahnDeDiffers() {
         let timetables = [stopover("gesundbrunnen", 0, delay: 19), stopover("bernau", 12, delay: 19), stopover("schwedt", 83, delay: 7)]
         let bahnDe = [bahnDeStop("gesundbrunnen", 0, delay: 7), bahnDeStop("bernau", 12, delay: 7), bahnDeStop("schwedt", 83, delay: 0)]
 
         #expect(delays(BahnDeClient.applyingLiveTimes(from: bahnDe, to: timetables, keepingDelays: true)) == [19, 19, 7])
-        // Without DB Timetables' answer bahn.de's times win, as before.
+        // Without DB OpenBoards' answer bahn.de's times win, as before.
         #expect(delays(BahnDeClient.applyingLiveTimes(from: bahnDe, to: timetables)) == [7, 7, 0])
     }
 
@@ -70,17 +70,17 @@ struct LiveTimePrecedenceTests {
         #expect(BahnDeClient.replaces(TimeInfo(planned: planned, actual: at(2)), with: at(5), keepingDelays: false))
     }
 
-    /// A train that runs early: bahn.de shows it on time, DB Timetables has the early time, which stays.
-    @Test func anEarlyTimeFromDBTimetablesStays() {
+    /// A train that runs early: bahn.de shows it on time, DB OpenBoards has the early time, which stays.
+    @Test func anEarlyTimeFromDBOpenBoardsStays() {
         let timetables = [stopover("a", 0, delay: -2), stopover("b", 10, delay: -1)]
         let bahnDe = [bahnDeStop("a", 0, delay: 0), bahnDeStop("b", 10, delay: 0)]
 
         #expect(delays(BahnDeClient.applyingLiveTimes(from: bahnDe, to: timetables, keepingDelays: true)) == [-2, -1])
-        // Without DB Timetables' answer, two minutes early still stays (bahn.de never turns it into on time); a minute early is a forecast and gives way.
+        // Without DB OpenBoards' answer, two minutes early still stays (bahn.de never turns it into on time); a minute early is a forecast and gives way.
         #expect(delays(BahnDeClient.applyingLiveTimes(from: bahnDe, to: timetables)) == [-2, 0])
     }
 
-    /// bahn.de shows early trains as on time. Without DB Timetables (`keepingDelays` off) an early time of two
+    /// bahn.de shows early trains as on time. Without DB OpenBoards (`keepingDelays` off) an early time of two
     /// minutes or more still isn't replaced by "on time"; a minute early (a forecast) is, and a real delay is.
     @Test func bahnDeNeverTurnsAnEarlyTimeIntoOnTime() {
         let known = [stopover("a", 0, delay: -10), stopover("b", 10, delay: -1), stopover("c", 20, delay: -5)]

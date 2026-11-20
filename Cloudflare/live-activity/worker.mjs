@@ -16,7 +16,7 @@ import {
 } from "./state.mjs";
 
 const MINUTE = 60;
-/// DB lists only changes: a train it reports none for runs on time once it is this close (`TimetablesClient.onTimeLookahead`).
+/// DB lists only changes: a train it reports none for runs on time once it is this close (`OpenBoardsClient.onTimeLookahead`).
 const ON_TIME_LOOKAHEAD = 2 * 3600;
 /// How far ahead a train missing from IRIS's schedule counts as not being there at all.
 const SCHEDULE_AHEAD = 3 * 3600;
@@ -213,7 +213,7 @@ async function check(activity, env, seconds, iris, apns) {
 // MARK: - Live data
 
 /// Lays IRIS's live data over the parts of `journey` that the activity shows at `seconds` (see `liveEvents`),
-/// as the app's `TimetablesClient.realtime(for:)`: a change IRIS reports wins, a train it reports none for runs on
+/// as the app's `OpenBoardsClient.realtime(for:)`: a change IRIS reports wins, a train it reports none for runs on
 /// time once it is about to, and where IRIS can't be asked, what the app sent stays. Changes `journey`.
 export async function refreshJourney(journey, seconds, iris) {
     const cancellations = new Map();

@@ -38,18 +38,18 @@ import Testing
         ], cancelled: false, remarks: [], source: .transitous)
     }
 
-    func timetablesClient(_ session: URLSession) -> TimetablesClient {
-        TimetablesClient(http: HTTPClient(session: session))
+    func timetablesClient(_ session: URLSession) -> OpenBoardsClient {
+        OpenBoardsClient(http: HTTPClient(session: session))
     }
 
     func delays(_ stops: [Stopover]) -> [Int?] { stops.map { $0.arrival?.delayMinutes ?? $0.departure?.delayMinutes } }
     func platforms(_ stops: [Stopover]) -> [String?] { stops.map { ($0.arrivalPlatform ?? $0.departurePlatform)?.best } }
 
-    /// DB Timetables reports +3 at Berlin, +18 at Frankfurt and Erfurt's platform; the whole run and the leg
+    /// DB OpenBoards reports +3 at Berlin, +18 at Frankfurt and Erfurt's platform; the whole run and the leg
     /// Halle → Frankfurt cut from it end up with the same times and platforms at the stops they share.
     @Test func legAndRunGetTheSameTimesAndPlatformsFromTheSameAnswers() async throws {
         let config = URLSessionConfiguration.ephemeral
-        config.protocolClasses = [ICE279TimetablesProtocol.self]
+        config.protocolClasses = [ICE279OpenBoardsProtocol.self]
         let session = URLSession(configuration: config)
         defer { session.invalidateAndCancel() }
         let mock = MockProvider(source: .transitous)
@@ -73,12 +73,12 @@ import Testing
         #expect(leg.arrivalPlatform?.best == "7")
     }
 
-    /// Hours ahead nothing is live yet (the card still shows what an earlier answer had), so DB Timetables
-    /// isn't asked about a stop without a change: the run opened from the card keeps the card's times
+    /// Hours ahead nothing is live yet (the card still shows what an earlier answer had), so DB's boards
+    /// have no live time for a stop: the run opened from the card keeps the card's times
     /// through its baseline instead of showing plain times and "0".
     @Test func theRememberedRunFillsWhatTheFreshAnswersLack() async throws {
         let config = URLSessionConfiguration.ephemeral
-        config.protocolClasses = [ICE279TimetablesProtocol.self]
+        config.protocolClasses = [ICE279OpenBoardsProtocol.self]
         let session = URLSession(configuration: config)
         defer { session.invalidateAndCancel() }
         let mock = MockProvider(source: .transitous)
@@ -180,34 +180,23 @@ import Testing
     }
 }
 
-/// DB Timetables for ICE 279 on 20 Oct 2026: +3 leaving Berlin, +18 arriving at Frankfurt, nothing known at Halle
-/// (no `fchg` entry: the train isn't about to run) and only the schedule (platform 2) at Erfurt.
-private final class ICE279TimetablesProtocol: URLProtocol, @unchecked Sendable {
-    override class func canInit(with request: URLRequest) -> Bool { true }
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func stopLoading() {}
-
-    override func startLoading() {
-        let path = request.url!.path
-        let body = switch path {
-        case _ where path.contains("plan/8011160/"):
-            #"<timetable station='Berlin Hbf'><s id="b"><tl c="ICE" n="279"/><dp pt="2610200643" pp="3"/></s></timetable>"#
-        case _ where path.hasSuffix("fchg/8011160"):
-            #"<timetable station='Berlin Hbf'><s id="b" eva="8011160"><dp ct="2610200646"/></s></timetable>"#
-        case _ where path.contains("plan/8010159/"):
-            #"<timetable station='Halle (Saale) Hbf'><s id="h"><tl c="ICE" n="279"/><ar pt="2610200751" pp="6"/><dp pt="2610200753" pp="6"/></s></timetable>"#
-        case _ where path.contains("plan/8010101/"):
-            #"<timetable station='Erfurt Hbf'><s id="e"><tl c="ICE" n="279"/><ar pt="2610200825" pp="2"/><dp pt="2610200827" pp="2"/></s></timetable>"#
-        case _ where path.contains("plan/8000105/"):
-            #"<timetable station='Frankfurt (Main) Hbf'><s id="f"><tl c="ICE" n="279"/><ar pt="2610201044" pp="7"/><dp pt="2610201050" pp="7"/></s></timetable>"#
-        case _ where path.hasSuffix("fchg/8000105"):
-            #"<timetable station='Frankfurt (Main) Hbf'><s id="f" eva="8000105"><ar ct="2610201102"/><dp ct="2610201105"/></s></timetable>"#
-        default:
-            "<timetable></timetable>"
+/// DB OpenBoards for ICE 279 on 20 Oct 2026: +3 leaving Berlin, +18 arriving at Frankfurt, nothing live at Halle
+/// (the train isn't about to run) and only the schedule (platform 2) at Erfurt.
+private final class ICE279OpenBoardsProtocol: OpenBoardsProtocol, @unchecked Sendable {
+    override class func answer(_ side: BoardSide, evas: [String], url: URL) -> (Int, String) {
+        func item(_ at: String, live: String? = nil, platform: String) -> [String: Any] {
+            OpenBoardsJSON.item(side, "ICE", 279, at: "2026-10-20T\(at):00+02:00", live: live.map { "2026-10-20T\($0):00+02:00" }, platformSchedule: platform)
         }
-        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: Data(body.utf8))
-        client?.urlProtocolDidFinishLoading(self)
+        let items: [[String: Any]]? = switch (side, evas.first) {
+        case (.departure, "8011160"): [item("06:43", live: "06:46", platform: "3")]
+        case (.arrival, "8010159"): [item("07:51", platform: "6")]
+        case (.departure, "8010159"): [item("07:53", platform: "6")]
+        case (.arrival, "8010101"): [item("08:25", platform: "2")]
+        case (.departure, "8010101"): [item("08:27", platform: "2")]
+        case (.arrival, "8000105"): [item("10:44", live: "11:02", platform: "7")]
+        case (.departure, "8000105"): [item("10:50", live: "11:05", platform: "7")]
+        default: nil
+        }
+        return items.map { (200, OpenBoardsJSON.board(side, $0)) } ?? super.answer(side, evas: evas, url: url)
     }
 }

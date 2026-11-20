@@ -2445,7 +2445,7 @@ private final class TwinTrainProtocol: URLProtocol, @unchecked Sendable {
         #expect(StationNames.mainEvaNumber(for: stop("cz-CZPTT_czptt:stop:CZ:55659", "Děčín hlavní nádraží", 50.7735, 14.2011)) == nil)
     }
 
-    /// Statistics, Timetables and the Wagenreihung look a stop's EVA number up through `BahnDeClient`:
+    /// Statistics, OpenBoards and the Wagenreihung look a stop's EVA number up through `BahnDeClient`:
     /// a station in the offline list never asks bahn.de, so a screen full of stops sends no burst.
     @Test func bahnDeIsNotAskedForAStationInTheOfflineList() async throws {
         let config = URLSessionConfiguration.ephemeral
@@ -4189,7 +4189,7 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
 
     /// Transitous only knows Westerland as the combined "Westerland(Sylt) ZOB/Bahnhof" stop, and
     /// bahn.de's nearest hit is a meta station bundling it with the bus station, whose ID has no
-    /// platforms in Timetables. The railway station itself must win.
+    /// platforms in OpenBoards. The railway station itself must win.
     @Test func evaSkipsMetaStationsAndBusStops() {
         let make = { (id: String, name: String, lat: Double, lon: Double, trains: Bool) in
             BahnDeClient.Candidate(station: Station(id: id, name: name, coordinate: Coordinate(latitude: lat, longitude: lon),
@@ -6908,19 +6908,19 @@ final class RoutingMockProvider: TransitProvider, @unchecked Sendable {
 
     /// The board's own feed brands the train differently from how the user typed it (an ÖBB "RJ" that
     /// DB's own feed would call "ICE", per `TransitousProvider`'s own doc comments on this) – direct
-    /// name matching finds nothing, so the DB Timetables API's real category/number/time is used to
+    /// name matching finds nothing, so DB's OpenBoards real category/number/time is used to
     /// find it anyway, purely by which board entry departs closest to that confirmed time.
-    @Test func rescuesTrainReportedUnderADifferentBrandViaTimetables() async throws {
+    @Test func rescuesTrainReportedUnderADifferentBrandViaOpenBoards() async throws {
         let mock = makeProvider()
         let rj = trip("rj423", "RJ 423", [stop(koeln, arr: nil, dep: 10), stop(berlin, arr: 240, dep: nil)])
         mock.trips[rj.id] = rj
         mock.boards[koeln.name] = [entry(rj, at: koeln, minutes: 10)]
 
         let config = URLSessionConfiguration.ephemeral
-        config.protocolClasses = [TimetablesPlanProtocol.self]
+        config.protocolClasses = [OpenBoardsPlanProtocol.self]
         let session = URLSession(configuration: config)
         defer { session.invalidateAndCancel() }
-        let timetables = TimetablesClient(http: HTTPClient(session: session))
+        let timetables = OpenBoardsClient(http: HTTPClient(session: session))
         let planner = TrainRoutePlanner(provider: CombinedProvider(primary: mock, fallback: nil, bahnDe: nil), timetables: timetables)
 
         let plan = try await planner.plan([TrainRequirement(trainName: "ICE 423", boarding: koeln)],
@@ -6930,9 +6930,9 @@ final class RoutingMockProvider: TransitProvider, @unchecked Sendable {
         #expect(plan.resolvedNames.values.first == "RJ 423")
     }
 
-    /// Without any Timetables client configured, an unmatched name still just fails to find the
+    /// Without any OpenBoards client configured, an unmatched name still just fails to find the
     /// train – no crash, no silent misbehavior.
-    @Test func skipsRescueWithoutTimetablesConfigured() async throws {
+    @Test func skipsRescueWithoutOpenBoardsConfigured() async throws {
         let mock = makeProvider()
         let rj = trip("rj423", "RJ 423", [stop(koeln, arr: nil, dep: 10), stop(berlin, arr: 240, dep: nil)])
         mock.trips[rj.id] = rj
@@ -7162,26 +7162,197 @@ final class RoutingMockProvider: TransitProvider, @unchecked Sendable {
     }
 }
 
-/// Serves a fixed DB Timetables `/plan` XML response (one ICE 423 departure) regardless of which
-/// hour bucket is requested, so `scheduledTimes`'s multi-bucket pagination doesn't need a fragile
-/// hour-by-hour fixture.
-private final class TimetablesPlanProtocol: URLProtocol, @unchecked Sendable {
-    override class func canInit(with request: URLRequest) -> Bool { true }
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func startLoading() {
-        // `base` (2026-01-15 08:00 UTC) plus 10 minutes, in Berlin local time, IRIS "YYMMDDHHmm" form.
-        let body = Data("""
-        <timetable station='Köln Hbf'><s id="1"><tl f="N" t="p" o="80" c="ICE" n="423"/><dp pt="2701150910" pp="7"/></s></timetable>
-        """.utf8)
-        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: body)
-        client?.urlProtocolDidFinishLoading(self)
+// MARK: - OpenBoards fixtures
+
+/// Builds the JSON DB's OpenBoards API answers with, from the few fields the app reads.
+enum OpenBoardsJSON {
+    /// One train's stop on a board. `live` is DB's forecast (`PREVIEW`), or the time it ran with `type: "REAL"`;
+    /// without it the time is the schedule's (`SCHEDULE`). `platform` is the live one, the schedule's if not given.
+    static func item(_ side: BoardSide, _ category: String, _ number: Int, line: String? = nil, at planned: String,
+                     live: String? = nil, type: String? = nil, platformSchedule: String? = nil, platform: String? = nil,
+                     cancelled: Bool = false, additional: Bool = false, journeyCancelled: Bool = false,
+                     messages: [Int] = []) -> [String: Any] {
+        var transport: [String: Any] = ["category": category, "categoryInternal": category, "journeyNumber": number,
+                                        "type": "REGIONAL_TRAIN", "journeyDescription": "\(category) \(number)"]
+        if let line { transport["line"] = ["name": line] }
+        var item: [String: Any] = [
+            side == .arrival ? "arrivalId" : "departureId": "\(category)\(number)-\(planned)",
+            "evaNumber": "8000000", "journeyId": "\(category)\(number)", "timeSchedule": planned, "time": live ?? planned,
+            "timeType": type ?? (live == nil ? "SCHEDULE" : "PREVIEW"), "cancelled": cancelled, "additional": additional,
+            "messages": messages, "transport": transport, "journeyInfo": ["journeyCancelled": journeyCancelled],
+        ]
+        if let platformSchedule { item["platformSchedule"] = ["name": platformSchedule] }
+        if let name = platform ?? platformSchedule { item["platform"] = ["name": name] }
+        return item
     }
-    override func stopLoading() {}
+
+    /// A whole answer: `items` (the `departures` or `arrivals`) and the delay reasons (`causes`) and quality
+    /// notices (`qualities`) they point to by message id.
+    static func board(_ side: BoardSide, _ items: [[String: Any]] = [], causes: [Int: String] = [:],
+                      qualities: [Int: String] = [:]) -> String {
+        let json: [String: Any] = [
+            side == .arrival ? "arrivals" : "departures": items,
+            "messages": ["risCauseCodes": causes.map { ["messageID": $0.key, "code": $0.value] },
+                         "risQualityDeviations": qualities.map { ["messageID": $0.key, "code": $0.value] }],
+            "stopPlaces": [], "administrations": [], "meta": [String: Any](),
+        ]
+        return String(decoding: try! JSONSerialization.data(withJSONObject: json, options: [.sortedKeys]), as: UTF8.self)
+    }
 }
 
-@Suite struct TimetablesPlanHoursTests {
+/// Answers the OpenBoards requests of a test: subclasses say what each board holds, every other board is empty.
+class OpenBoardsProtocol: URLProtocol, @unchecked Sendable {
+    /// `(status, body)` for the `side` board asked for `evas`.
+    class func answer(_ side: BoardSide, evas: [String], url: URL) -> (Int, String) {
+        (200, OpenBoardsJSON.board(side))
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func stopLoading() {}
+
+    override func startLoading() {
+        let url = request.url!
+        let side: BoardSide = url.lastPathComponent == "arrivals" ? .arrival : .departure
+        let evas = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
+            .first { $0.name == "evas" }?.value?.split(separator: ",").map(String.init) ?? []
+        let (status, body) = type(of: self).answer(side, evas: evas, url: url)
+        let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+}
+
+/// Serves one ICE 423 departure (`base` plus 10 minutes) whichever hour is asked for, so `scheduledTimes`'s
+/// pagination doesn't need a fragile hour-by-hour fixture.
+private final class OpenBoardsPlanProtocol: OpenBoardsProtocol, @unchecked Sendable {
+    override class func answer(_ side: BoardSide, evas: [String], url: URL) -> (Int, String) {
+        (200, OpenBoardsJSON.board(side, side == .departure
+            ? [OpenBoardsJSON.item(.departure, "ICE", 423, at: "2027-01-15T09:10:00+01:00", platformSchedule: "7")] : []))
+    }
+}
+
+/// How an OpenBoards answer becomes an entry: a forecast equal to the schedule is no live time, a platform
+/// only counts as changed when it differs from the planned one, and what never ran isn't a stop.
+@Suite struct OpenBoardsParserTests {
+    func entry(_ item: [String: Any], _ side: BoardSide = .departure) throws -> OpenBoardsEntry? {
+        try OpenBoardsParser.parse(Data(OpenBoardsJSON.board(side, [item]).utf8), side: side).first
+    }
+
+    @Test func aForecastEqualToTheScheduleIsNoLiveTime() throws {
+        let item = OpenBoardsJSON.item(.departure, "ICE", 571, at: "2027-01-15T09:00:00+01:00", live: "2027-01-15T09:00:00+01:00")
+        #expect(try entry(item)?.event.actual == nil)
+        #expect(try entry(OpenBoardsJSON.item(.departure, "ICE", 571, at: "2027-01-15T09:00:00+01:00"))?.event.actual == nil)
+    }
+
+    @Test func aDifferingOrRealTimeIsLive() throws {
+        let late = OpenBoardsJSON.item(.departure, "ICE", 571, at: "2027-01-15T09:00:00+01:00", live: "2027-01-15T09:07:00+01:00")
+        #expect(try entry(late)?.event.actual == Date(timeIntervalSince1970: 1_800_000_000 + 7 * 60))
+        let early = OpenBoardsJSON.item(.departure, "ICE", 571, at: "2027-01-15T09:00:00+01:00", live: "2027-01-15T08:58:00+01:00")
+        #expect(try entry(early)?.event.actual == Date(timeIntervalSince1970: 1_800_000_000 - 2 * 60))
+        let ran = OpenBoardsJSON.item(.departure, "ICE", 571, at: "2027-01-15T09:00:00+01:00", live: "2027-01-15T09:00:00+01:00", type: "REAL")
+        #expect(try entry(ran)?.event.actual == Date(timeIntervalSince1970: 1_800_000_000))
+    }
+
+    @Test func aPlatformOnlyCountsAsChangedWhenItDiffers() throws {
+        let same = OpenBoardsJSON.item(.departure, "S", 15, at: "2027-01-15T09:00:00+01:00", platformSchedule: "12")
+        #expect(try entry(same)?.event.plannedPlatform == "12")
+        #expect(try entry(same)?.event.actualPlatform == nil)
+        let moved = OpenBoardsJSON.item(.departure, "S", 15, at: "2027-01-15T09:00:00+01:00", platformSchedule: "12", platform: "14")
+        #expect(try entry(moved)?.event.plannedPlatform == "12")
+        #expect(try entry(moved)?.event.actualPlatform == "14")
+        // Without a scheduled platform DB's one is all there is: planned, not a change.
+        let unscheduled = OpenBoardsJSON.item(.departure, "S", 15, at: "2027-01-15T09:00:00+01:00", platform: "3")
+        #expect(try entry(unscheduled)?.event.plannedPlatform == "3")
+        #expect(try entry(unscheduled)?.event.actualPlatform == nil)
+    }
+
+    @Test func cancellationsCountPerStopAndForTheWholeJourney() throws {
+        #expect(try entry(OpenBoardsJSON.item(.arrival, "RE", 1, at: "2027-01-15T09:00:00+01:00", cancelled: true), .arrival)?.event.cancelled == true)
+        #expect(try entry(OpenBoardsJSON.item(.arrival, "RE", 1, at: "2027-01-15T09:00:00+01:00", journeyCancelled: true), .arrival)?.event.cancelled == true)
+        #expect(try entry(OpenBoardsJSON.item(.arrival, "RE", 1, at: "2027-01-15T09:00:00+01:00"), .arrival)?.event.cancelled == false)
+    }
+
+    @Test func aCancelledAdditionalStopWasNeverPartOfThePlan() throws {
+        let item = OpenBoardsJSON.item(.departure, "RE", 1, at: "2027-01-15T09:00:00+01:00", cancelled: true, additional: true)
+        #expect(try entry(item) == nil)
+    }
+
+    @Test func readsTheSideAskedFor() throws {
+        let data = Data(OpenBoardsJSON.board(.arrival, [OpenBoardsJSON.item(.arrival, "RE", 1, at: "2027-01-15T09:00:00+01:00")]).utf8)
+        #expect(try OpenBoardsParser.parse(data, side: .arrival).count == 1)
+        #expect(try OpenBoardsParser.parse(data, side: .departure).isEmpty)
+    }
+
+    @Test func anAnswerThatIsNoBoardThrows() {
+        #expect(throws: (any Error).self) { try OpenBoardsParser.parse(Data("<timetable/>".utf8), side: .departure) }
+    }
+}
+
+/// A board is asked for a window that only depends on the half hour of the time looked up, so the lookups of a
+/// whole station board share one request, and that reaches before and well after the time for early and late trains.
+@Suite struct OpenBoardsWindowTests {
+    // 2027-01-15 08:00 UTC.
+    let base = Date(timeIntervalSince1970: 1_800_000_000)
+
+    @Test func theWindowIsTheSameWithinAHalfHour() {
+        let first = OpenBoardsClient.window(around: base)
+        let second = OpenBoardsClient.window(around: base.addingTimeInterval(29 * 60))
+        #expect(first.start == second.start && first.end == second.end)
+        #expect(OpenBoardsClient.window(around: base.addingTimeInterval(30 * 60)).start > first.start)
+    }
+
+    @Test func theWindowReachesBeforeAndAfterTheTime() {
+        for minutes in [0.0, 14, 29] {
+            let time = base.addingTimeInterval(minutes * 60)
+            let window = OpenBoardsClient.window(around: time)
+            #expect(window.start <= time.addingTimeInterval(-OpenBoardsClient.lookBehind))
+            #expect(window.end >= time.addingTimeInterval(OpenBoardsClient.lookAhead))
+            #expect(window.end.timeIntervalSince(window.start) < 2 * 3600)
+        }
+    }
+}
+
+/// What the app sends: a GET to our Worker for the side's board with the EVAs and the window in UTC.
+@Suite struct OpenBoardsRequestTests {
+    @Test func asksTheDepartureBoardOfTheStation() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [RequestLogProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        RequestLogProtocol.urls.withLock { $0 = [] }
+        let departure = Date(timeIntervalSince1970: 1_800_000_000)
+        let client = OpenBoardsClient(http: HTTPClient(session: session))
+        let leg = Leg(origin: station("8000105", "Frankfurt(Main)Hbf", 50.107, 8.663, source: .bahnDe), destination: station("8000261", "München Hbf", 48.140, 11.558, source: .bahnDe),
+                      departure: TimeInfo(planned: departure, actual: nil), arrival: TimeInfo(planned: departure.addingTimeInterval(3600), actual: nil),
+                      departurePlatform: nil, arrivalPlatform: nil, tripId: "ice", line: Line(name: "ICE 571", number: "571", product: .highSpeed, operatorName: nil),
+                      direction: nil, isWalking: false, cancelled: false, stopovers: [], remarks: [], source: .transitous)
+
+        _ = await client.realtime(for: leg)
+
+        let urls = RequestLogProtocol.urls.withLock { $0 }
+        let departures = try #require(urls.first { $0.lastPathComponent == "departures" })
+        #expect(departures.absoluteString.hasPrefix(OpenBoardsClient.baseURL.absoluteString + "/departures?"))
+        let query = Dictionary(uniqueKeysWithValues: URLComponents(url: departures, resolvingAgainstBaseURL: false)!.queryItems!.map { ($0.name, $0.value ?? "") })
+        // Frankfurt Hbf's board is asked together with its lower level (see `lowerLevels`).
+        #expect(query["evas"] == "8000105,8098105")
+        let window = OpenBoardsClient.window(around: departure)
+        #expect(query["from"] == JSONDecoding.isoString(window.start))
+        #expect(query["to"] == JSONDecoding.isoString(window.end))
+        #expect(urls.contains { $0.lastPathComponent == "arrivals" && $0.absoluteString.contains("evas=8000261,8098263") })
+    }
+}
+
+private final class RequestLogProtocol: OpenBoardsProtocol, @unchecked Sendable {
+    static let urls = Mutex<[URL]>([])
+    override class func answer(_ side: BoardSide, evas: [String], url: URL) -> (Int, String) {
+        urls.withLock { $0.append(url) }
+        return super.answer(side, evas: evas, url: url)
+    }
+}
+
+@Suite struct OpenBoardsPlanHoursTests {
     // 2027-01-15 13:50 UTC == 14:50 Europe/Berlin (CET).
     let from = Date(timeIntervalSince1970: 1_800_000_000 + 6 * 3600 - 600)
 
@@ -7192,43 +7363,43 @@ private final class TimetablesPlanProtocol: URLProtocol, @unchecked Sendable {
     }
 
     @Test func shortWindowIncludesTheNextHourBucket() {
-        #expect(berlinHours(TimetablesClient.planHours(from: from, duration: 30)) == [14, 15])
+        #expect(berlinHours(OpenBoardsClient.planHours(from: from, duration: 30)) == [14, 15])
     }
 
     @Test func longWindowIncludesTheBucketOfItsEnd() {
-        #expect(berlinHours(TimetablesClient.planHours(from: from, duration: 480)) == Array(14...22))
+        #expect(berlinHours(OpenBoardsClient.planHours(from: from, duration: 480)) == Array(14...22))
     }
 
     @Test func fullHourWindowDoesNotAddAnExtraBucket() {
         let onTheHour = from.addingTimeInterval(600)
-        #expect(berlinHours(TimetablesClient.planHours(from: onTheHour, duration: 60)) == [15])
+        #expect(berlinHours(OpenBoardsClient.planHours(from: onTheHour, duration: 60)) == [15])
     }
 }
 
-@Suite struct TimetablesCategoryTests {
+@Suite struct OpenBoardsCategoryTests {
     @Test func splitsCategoryAndNumberWhenSeparatedBySpace() {
-        #expect(TimetablesClient.category(from: "ICE 571") == "ICE")
-        #expect(TimetablesClient.category(from: "RE 5") == "RE")
+        #expect(OpenBoardsClient.category(from: "ICE 571") == "ICE")
+        #expect(OpenBoardsClient.category(from: "RE 5") == "RE")
     }
 
     /// Transitous names S-Bahn (and some other) lines with no space between the letter prefix and the
-    /// number ("S15", not "S 15") — this must still split into IRIS's own "S" category, or every
-    /// Timetables lookup for an S-Bahn train silently matches nothing.
+    /// number ("S15", not "S 15") — this must still split into DB's own "S" category, or every
+    /// OpenBoards lookup for an S-Bahn train silently matches nothing.
     @Test func splitsCategoryAndNumberWithNoSpace() {
-        #expect(TimetablesClient.category(from: "S15") == "S")
-        #expect(TimetablesClient.category(from: "U8") == "U")
+        #expect(OpenBoardsClient.category(from: "S15") == "S")
+        #expect(OpenBoardsClient.category(from: "U8") == "U")
     }
 }
 
 /// Real-world scenario reported for the S15 (Berlin Hbf → Berlin Gesundbrunnen): Transitous returns
-/// no platform at all for some S-Bahn stops, even though DB's own Timetables ("IRIS") `plan` feed
-/// always carries the scheduled one. `TimetablesClient.realtime(for:)` should fill that gap, while
-/// still preferring a genuine Gleisänderung (`fchg`'s `cp`) over the leg's own planned platform when
+/// no platform at all for some S-Bahn stops, even though DB's own OpenBoards
+/// always carry the scheduled one. `OpenBoardsClient.realtime(for:)` should fill that gap, while
+/// still preferring a genuine Gleisänderung (a live platform that differs from the planned one) over the leg's own planned platform when
 /// the leg already has one.
-@Suite struct TimetablesRealtimePlatformTests {
+@Suite struct OpenBoardsRealtimePlatformTests {
     let berlinHbf = station("8011160", "Berlin Hbf", 52.525, 13.369, source: .bahnDe)
     let gesundbrunnen = station("8011102", "Berlin Gesundbrunnen", 52.549, 13.391, source: .bahnDe)
-    // 2027-01-15 08:00 UTC == 09:00 Europe/Berlin (CET) -> IRIS "2701150900".
+    // 2027-01-15 08:00 UTC == 09:00 Europe/Berlin (CET).
     let departure = Date(timeIntervalSince1970: 1_800_000_000)
 
     func leg(departurePlatform: PlatformInfo?) -> Leg {
@@ -7243,11 +7414,11 @@ private final class TimetablesPlanProtocol: URLProtocol, @unchecked Sendable {
             source: .transitous)
     }
 
-    func client(_ protocolClass: URLProtocol.Type) -> (TimetablesClient, URLSession) {
+    func client(_ protocolClass: URLProtocol.Type) -> (OpenBoardsClient, URLSession) {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [protocolClass]
         let session = URLSession(configuration: config)
-        let client = TimetablesClient(http: HTTPClient(session: session))
+        let client = OpenBoardsClient(http: HTTPClient(session: session))
         return (client, session)
     }
 
@@ -7320,13 +7491,13 @@ private final class TimetablesPlanProtocol: URLProtocol, @unchecked Sendable {
     }
 }
 
-/// Issue #76, for a station not in `lowerLevels`: station search only finds "Hamburg-Altona" (8002553),
-/// whose `plan` has none of the S-Bahn; DB lists those under "Hamburg-Altona(S)" (8098553), named in
-/// 8002553's `/station` `meta` (real data from 2026-10-02).
-@Suite struct TimetablesOtherLevelTests {
+/// Issue #76, for a station not in `lowerLevels`: station search only finds "Hamburg-Altona" (8002553), but DB
+/// lists the S-Bahn under "Hamburg-Altona(S)" (8098553). OpenBoards' board of a station also holds the stop places of
+/// its transfer area, so one request for 8002553 has them all (real data from 2026-10-02).
+@Suite struct OpenBoardsWidenedBoardTests {
     let dammtor = station("8002548", "Hamburg Dammtor", 53.560, 9.990, source: .bahnDe)
     let altona = station("8002553", "Hamburg-Altona", 53.552, 9.935, source: .bahnDe)
-    // 2027-01-15 08:00 UTC == 09:00 Europe/Berlin (CET) -> IRIS "2701150900".
+    // 2027-01-15 08:00 UTC == 09:00 Europe/Berlin (CET).
     let departure = Date(timeIntervalSince1970: 1_800_000_000)
 
     var leg: Leg {
@@ -7339,33 +7510,33 @@ private final class TimetablesPlanProtocol: URLProtocol, @unchecked Sendable {
             source: .transitous)
     }
 
-    @Test func findsTheSBahnAtTheStationsOtherLevel() async throws {
+    @Test func findsTheSBahnOnTheStationsBoardWithoutWalkingThroughItsLevels() async throws {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [HamburgSBahnLevelProtocol.self]
         let session = URLSession(configuration: config)
         defer { session.invalidateAndCancel() }
-        let timetables = TimetablesClient(http: HTTPClient(session: session))
+        HamburgSBahnLevelProtocol.requested.withLock { $0 = [] }
+        let timetables = OpenBoardsClient(http: HTTPClient(session: session))
 
         let override = try #require(await timetables.realtime(for: leg))
 
         #expect(override.arrival?.actual == departure.addingTimeInterval(360))
         #expect(override.arrivalPlatform == PlatformInfo(planned: "4", actual: nil))
         #expect(override.departure?.actual == departure.addingTimeInterval(180))
-        let requested = HamburgSBahnLevelProtocol.requestedPaths.withLock { $0 }
-        // Bus stops and other non-EVA ids in `meta` are never asked for.
-        #expect(!requested.contains { $0.contains("140269") || $0.contains("692757") })
+        // One board per side, nothing else is asked for.
+        #expect(HamburgSBahnLevelProtocol.requested.withLock { $0 }.sorted() == ["arrival/8002553", "departure/8002548"])
     }
 }
 
 /// #411, ICE 905 on 2026-10-19: Transitous' stop for Berlin Südkreuz has no EVA number, and the offline list has
 /// two for its levels (8011113, 8089073). DB's delay must come without bahn.de's station search, which was paused.
-@Suite struct TimetablesMultiLevelStationTests {
+@Suite struct OpenBoardsMultiLevelStationTests {
     @Test func findsTheDelayAtAStationWithSeveralLevelsWithoutBahnDe() async throws {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [SuedkreuzProtocol.self]
         let session = URLSession(configuration: config)
         defer { session.invalidateAndCancel() }
-        let timetables = TimetablesClient(http: HTTPClient(session: session))
+        let timetables = OpenBoardsClient(http: HTTPClient(session: session))
         let suedkreuz = Station(id: "de-DELFI_de:11000:900058101:3:54", name: "S Südkreuz Bhf (Berlin)",
                                 coordinate: Coordinate(latitude: 52.4757, longitude: 13.3655), evaNumber: nil, source: .transitous)
         // 2026-10-19 23:36 in Berlin.
@@ -7383,77 +7554,52 @@ private final class TimetablesPlanProtocol: URLProtocol, @unchecked Sendable {
     }
 }
 
-private final class SuedkreuzProtocol: URLProtocol, @unchecked Sendable {
+private final class SuedkreuzProtocol: OpenBoardsProtocol, @unchecked Sendable {
     static let requestedPaths = Mutex<[String]>([])
 
-    override class func canInit(with request: URLRequest) -> Bool { true }
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func stopLoading() {}
-
-    override func startLoading() {
-        let path = request.url!.path
-        Self.requestedPaths.withLock { $0.append(path) }
-        // As IRIS answered (ids shortened); bahn.de's station search fails like during its pause.
-        let (status, body) = switch path {
-        case _ where path.hasSuffix("plan/8011113/261019/23"):
-            (200, #"<timetable station="Berlin Südkreuz"><s id="905-3"><tl c="ICE" n="905"/><ar pt="2610192334" pp="5"/><dp pt="2610192336" pp="5"/></s></timetable>"#)
-        case _ where path.hasSuffix("fchg/8011113"):
-            (200, #"<timetable station="Berlin Südkreuz"><s id="905-3" eva="8011113"><ar ct="2610192335"/><dp ct="2610192337"/></s></timetable>"#)
-        case _ where path.contains("reiseloesung/orte"):
-            (503, #"{"error":"paused"}"#)
-        default:
-            (200, "<timetable></timetable>")
-        }
-        let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: Data(body.utf8))
-        client?.urlProtocolDidFinishLoading(self)
+    override class func answer(_ side: BoardSide, evas: [String], url: URL) -> (Int, String) {
+        requestedPaths.withLock { $0.append(url.path) }
+        // As DB answered (ids shortened); bahn.de's station search fails like during its pause.
+        if url.path.contains("reiseloesung/orte") { return (503, #"{"error":"paused"}"#) }
+        guard evas == ["8011113"] else { return super.answer(side, evas: evas, url: url) }
+        return (200, OpenBoardsJSON.board(side, [side == .arrival
+            ? OpenBoardsJSON.item(.arrival, "ICE", 905, at: "2026-10-19T23:34:00+02:00", live: "2026-10-19T23:35:00+02:00", platformSchedule: "5")
+            : OpenBoardsJSON.item(.departure, "ICE", 905, at: "2026-10-19T23:36:00+02:00", live: "2026-10-19T23:37:00+02:00", platformSchedule: "5")]))
     }
 }
 
-private final class HamburgSBahnLevelProtocol: URLProtocol, @unchecked Sendable {
-    static let requestedPaths = Mutex<[String]>([])
+private final class HamburgSBahnLevelProtocol: OpenBoardsProtocol, @unchecked Sendable {
+    static let requested = Mutex<[String]>([])
 
-    override class func canInit(with request: URLRequest) -> Bool { true }
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func stopLoading() {}
-
-    override func startLoading() {
-        let path = request.url!.path
-        Self.requestedPaths.withLock { $0.append(path) }
-        let body = switch path {
-        case _ where path.hasSuffix("plan/8002548/270115/09"):
-            #"<timetable station='Hamburg Dammtor'><s id="d"><tl c="S" n="47137"/><ar pt="2701150859"/><dp pt="2701150900" pp="3"/></s></timetable>"#
-        case _ where path.hasSuffix("fchg/8002548"):
-            #"<timetable station='Hamburg Dammtor'><s id="d" eva="8002548"><ar ct="2701150902"/><dp ct="2701150903"/></s></timetable>"#
-        case _ where path.hasSuffix("plan/8002553/270115/09"):
-            #"<timetable station='Hamburg-Altona'><s id="re"><tl c="RE" n="21007"/><ar pt="2701150903" pp="9"/></s></timetable>"#
-        case _ where path.hasSuffix("station/8002553"):
-            #"<stations><station meta="140269|210426|510421|692757|8098553" name="Hamburg-Altona" eva="8002553"/></stations>"#
-        case _ where path.hasSuffix("plan/8098553/270115/09"):
-            #"<timetable station='Hamburg-Altona(S)'><s id="a"><tl c="S" n="47137"/><ar pt="2701150903" pp="4"/></s></timetable>"#
-        case _ where path.hasSuffix("fchg/8098553"):
-            #"<timetable station='Hamburg-Altona(S)'><s id="a" eva="8098553"><ar ct="2701150906"/></s></timetable>"#
+    override class func answer(_ side: BoardSide, evas: [String], url: URL) -> (Int, String) {
+        requested.withLock { $0.append("\(side)/\(evas.joined(separator: ","))") }
+        switch (side, evas) {
+        case (.departure, ["8002548"]):
+            return (200, OpenBoardsJSON.board(side, [
+                OpenBoardsJSON.item(.departure, "S", 47137, line: "S7", at: "2027-01-15T09:00:00+01:00", live: "2027-01-15T09:03:00+01:00", platformSchedule: "3"),
+            ]))
+        case (.arrival, ["8002553"]):
+            // The RE is Altona's own, the S-Bahn comes from the S-Bahn level of the same transfer area.
+            return (200, OpenBoardsJSON.board(side, [
+                OpenBoardsJSON.item(.arrival, "RE", 21007, at: "2027-01-15T09:03:00+01:00", platformSchedule: "9"),
+                OpenBoardsJSON.item(.arrival, "S", 47137, line: "S7", at: "2027-01-15T09:03:00+01:00", live: "2027-01-15T09:06:00+01:00", platformSchedule: "4"),
+            ]))
         default:
-            "<timetable></timetable>"
+            return super.answer(side, evas: evas, url: url)
         }
-        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: Data(body.utf8))
-        client?.urlProtocolDidFinishLoading(self)
     }
 }
 
 /// Issue #76 as seen in a saved journey: S7 Bergedorf 12:58 → Hamburg Hbf 13:19 running 3 minutes late.
 /// Transitous had no realtime for it (its stops then carry the plan as "actual"), so only DB's
-/// Timetables can tell, and the refreshed leg must end with DB's +3 like the trip view does.
+/// OpenBoards can tell, and the refreshed leg must end with DB's +3 like the trip view does.
 @Suite(.serialized) struct JourneyRefresherSBahnLevelTests {
     @Test func refreshedLegEndsWithDBsDelayAtTheSBahnLevel() async throws {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [BergedorfS7Protocol.self]
         let session = URLSession(configuration: config)
         defer { session.invalidateAndCancel() }
-        let timetables = TimetablesClient(http: HTTPClient(session: session))
+        let timetables = OpenBoardsClient(http: HTTPClient(session: session))
 
         let bergedorf = station("8000148", "Hamburg-Bergedorf", 53.490, 10.206, source: .bahnDe)
         let hauptbahnhof = station("8002549", "Hamburg Hbf", 53.553, 10.007, source: .bahnDe)
@@ -7482,22 +7628,22 @@ private final class HamburgSBahnLevelProtocol: URLProtocol, @unchecked Sendable 
         #expect(refreshed.legs[0].stopovers.last?.arrival?.actual == arrival.addingTimeInterval(180))
     }
 
-    /// The first request for Hamburg Hbf's (large) `fchg` fails, as a timeout would; the stops'
+    /// The first request for Hamburg Hbf's (large) board fails, as a timeout would; the stops'
     /// lookup right after gets through. The leg's end must still show DB's +3, not Transitous' "+0".
     @Test func legEndKeepsTheStopsDelayWhenItsOwnLookupFailed() async throws {
-        BergedorfS7Protocol.failHbfChangesOnce.withLock { $0 = true }
-        defer { BergedorfS7Protocol.failHbfChangesOnce.withLock { $0 = false } }
+        BergedorfS7Protocol.failHbfBoardOnce.withLock { $0 = true }
+        defer { BergedorfS7Protocol.failHbfBoardOnce.withLock { $0 = false } }
         try await refreshedLegEndsWithDBsDelayAtTheSBahnLevel()
     }
 
     /// Hours after the ride neither source has live data any more: Transitous sends the bare schedule
-    /// and DB has dropped the train from `fchg`. The delay saved while it ran must stay, not become "+0".
+    /// and DB has dropped the train from its boards. The delay saved while it ran must stay, not become "+0".
     @Test func finishedLegKeepsItsDelayOnceLiveDataIsGone() async throws {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [BergedorfS7Protocol.self]
         let session = URLSession(configuration: config)
         defer { session.invalidateAndCancel() }
-        let timetables = TimetablesClient(http: HTTPClient(session: session))
+        let timetables = OpenBoardsClient(http: HTTPClient(session: session))
 
         let bergedorf = station("8000148", "Hamburg-Bergedorf", 53.490, 10.206, source: .bahnDe)
         let hauptbahnhof = station("8002549", "Hamburg Hbf", 53.553, 10.007, source: .bahnDe)
@@ -7593,52 +7739,37 @@ private final class HamburgSBahnLevelProtocol: URLProtocol, @unchecked Sendable 
     }
 }
 
-/// IRIS for S 47124 on 2026-10-02 (real ids/times): Bergedorf lists it, Hamburg Hbf (8002549) doesn't,
-/// "Hamburg Hbf (S-Bahn)" (8098549) does, 3 minutes late.
-private final class BergedorfS7Protocol: URLProtocol, @unchecked Sendable {
-    static let failHbfChangesOnce = Mutex(false)
+/// OpenBoards for S 47124 on 2026-10-02 (real times): Bergedorf lists it, and so does Hamburg Hbf's board together
+/// with "Hamburg Hbf (S-Bahn)" (8098549), 3 minutes late.
+private final class BergedorfS7Protocol: OpenBoardsProtocol, @unchecked Sendable {
+    static let failHbfBoardOnce = Mutex(false)
 
-    override class func canInit(with request: URLRequest) -> Bool { true }
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func stopLoading() {}
-
-    override func startLoading() {
-        let path = request.url!.path
-        if path.hasSuffix("fchg/8098549"), Self.failHbfChangesOnce.withLock({ fail in defer { fail = false }; return fail }) {
-            let response = HTTPURLResponse(url: request.url!, statusCode: 500, httpVersion: nil, headerFields: nil)!
-            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-            client?.urlProtocol(self, didLoad: Data())
-            client?.urlProtocolDidFinishLoading(self)
-            return
-        }
-        let body = switch path {
-        case _ where path.contains("plan/8000148/"):
-            #"<timetable station='Hamburg-Bergedorf'><s id="b"><tl c="S" n="47124"/><ar pt="2610021257" pp="5"/><dp pt="2610021258" pp="5"/></s></timetable>"#
-        case _ where path.hasSuffix("fchg/8000148"):
-            #"<timetable station='Hamburg-Bergedorf'><s id="b" eva="8000148"><ar ct="2610021259"/><dp ct="2610021301"/></s></timetable>"#
-        case _ where path.contains("plan/8098549/"):
-            #"<timetable station='Hamburg Hbf (S-Bahn)'><s id="-7201046121150801590-2610021248-12"><tl c="S" n="47124"/><ar pt="2610021319" pp="1" l="S7"/><dp pt="2610021320" pp="1" l="S7"/></s></timetable>"#
-        case _ where path.hasSuffix("fchg/8098549"):
-            #"<timetable station='Hamburg Hbf (S-Bahn)'><s id="-7201046121150801590-2610021248-12" eva="8098549"><ar ct="2610021322" l="S7"/><dp ct="2610021324" l="S7"/></s></timetable>"#
+    override class func answer(_ side: BoardSide, evas: [String], url: URL) -> (Int, String) {
+        if evas.contains("8098549"), failHbfBoardOnce.withLock({ fail in defer { fail = false }; return fail }) { return (500, "") }
+        switch (side, evas.first) {
+        case (.arrival, "8000148"):
+            return (200, OpenBoardsJSON.board(side, [OpenBoardsJSON.item(.arrival, "S", 47124, at: "2026-10-02T12:57:00+02:00", live: "2026-10-02T12:59:00+02:00", platformSchedule: "5")]))
+        case (.departure, "8000148"):
+            return (200, OpenBoardsJSON.board(side, [OpenBoardsJSON.item(.departure, "S", 47124, at: "2026-10-02T12:58:00+02:00", live: "2026-10-02T13:01:00+02:00", platformSchedule: "5")]))
+        case (.arrival, "8002549"):
+            return (200, OpenBoardsJSON.board(side, [OpenBoardsJSON.item(.arrival, "S", 47124, line: "S7", at: "2026-10-02T13:19:00+02:00", live: "2026-10-02T13:22:00+02:00", platformSchedule: "1")]))
+        case (.departure, "8002549"):
+            return (200, OpenBoardsJSON.board(side, [OpenBoardsJSON.item(.departure, "S", 47124, line: "S7", at: "2026-10-02T13:20:00+02:00", live: "2026-10-02T13:24:00+02:00", platformSchedule: "1")]))
         default:
-            "<timetable></timetable>"
+            return super.answer(side, evas: evas, url: url)
         }
-        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: Data(body.utf8))
-        client?.urlProtocolDidFinishLoading(self)
     }
 }
 
 /// Issue #76: an S4 ending at München Hbf showed its arrival on time while running 3 minutes late.
-/// DB's Timetables only lists the S-Bahn under "München Hbf (tief)", which station search never finds.
-@Suite struct TimetablesLowerLevelTests {
+/// DB lists the S-Bahn under "München Hbf (tief)", which station search never finds, so its board is asked for too.
+@Suite struct OpenBoardsLowerLevelTests {
     @Test func findsTheSBahnUnderTheStationsLowerLevel() async throws {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [LowerLevelS4Protocol.self]
         let session = URLSession(configuration: config)
         defer { session.invalidateAndCancel() }
-        let timetables = TimetablesClient(http: HTTPClient(session: session))
+        let timetables = OpenBoardsClient(http: HTTPClient(session: session))
         // 2027-01-15 08:00 UTC == 09:00 Europe/Berlin (CET).
         let departure = Date(timeIntervalSince1970: 1_800_000_000)
         let leg = Leg(origin: station("8004158", "München-Pasing", 48.150, 11.461, source: .bahnDe),
@@ -7655,88 +7786,45 @@ private final class BergedorfS7Protocol: URLProtocol, @unchecked Sendable {
     }
 }
 
-/// München Hbf's own `/plan` doesn't have the S4; its lower level (8098263) does, 3 minutes late.
-private final class LowerLevelS4Protocol: URLProtocol, @unchecked Sendable {
-    override class func canInit(with request: URLRequest) -> Bool { true }
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func startLoading() {
-        let path = request.url!.path
-        let body: Data
-        if path.contains("plan/8098263/") {
-            body = Data("""
-            <timetable station='München Hbf (tief)'><s id="7"><tl c="S" n="6467"/><ar pt="2701150910" pp="1" l="4"/></s></timetable>
-            """.utf8)
-        } else if path.contains("fchg/8098263") {
-            body = Data("""
-            <timetable station='München Hbf (tief)'><s id="7"><ar ct="2701150913"/></s></timetable>
-            """.utf8)
-        } else {
-            body = Data("<timetable></timetable>".utf8)
-        }
-        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: body)
-        client?.urlProtocolDidFinishLoading(self)
+/// München Hbf's board is asked for together with its lower level (8098263), where the S4 is, 3 minutes late.
+private final class LowerLevelS4Protocol: OpenBoardsProtocol, @unchecked Sendable {
+    override class func answer(_ side: BoardSide, evas: [String], url: URL) -> (Int, String) {
+        guard side == .arrival, evas == ["8000261", "8098263"] else { return super.answer(side, evas: evas, url: url) }
+        return (200, OpenBoardsJSON.board(side, [
+            OpenBoardsJSON.item(.arrival, "S", 6467, line: "4", at: "2027-01-15T09:10:00+01:00", live: "2027-01-15T09:13:00+01:00", platformSchedule: "1"),
+        ]))
     }
-    override func stopLoading() {}
 }
 
-/// `/plan` has a scheduled platform for the S15 at Berlin Hbf, but `/fchg` reports no Gleisänderung
-/// (or anything else) yet. `/fchg` for Gesundbrunnen (the arrival side, not under test) is likewise
-/// empty for every request, matched here by responding the same way regardless of path.
-private final class UnchangedS15Protocol: URLProtocol, @unchecked Sendable {
-    override class func canInit(with request: URLRequest) -> Bool { true }
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func startLoading() {
-        let path = request.url!.path
-        let body: Data = path.contains("plan/")
-            ? Data("""
-              <timetable station='Berlin Hbf'><s id="1"><tl c="S" n="15"/><dp pt="2701150900" pp="12"/></s></timetable>
-              """.utf8)
-            : Data("<timetable></timetable>".utf8)
-        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: body)
-        client?.urlProtocolDidFinishLoading(self)
+/// DB has a scheduled platform for the S15 at Berlin Hbf, but reports no Gleisänderung (or anything else) yet.
+/// Gesundbrunnen (the arrival side, not under test) has no board entry at all.
+private final class UnchangedS15Protocol: OpenBoardsProtocol, @unchecked Sendable {
+    override class func answer(_ side: BoardSide, evas: [String], url: URL) -> (Int, String) {
+        guard side == .departure, evas.contains("8011160") else { return super.answer(side, evas: evas, url: url) }
+        return (200, OpenBoardsJSON.board(side, [
+            OpenBoardsJSON.item(.departure, "S", 15, line: "S15", at: "2027-01-15T09:00:00+01:00", platformSchedule: "12"),
+        ]))
     }
-    override func stopLoading() {}
 }
 
-/// Same schedule as `UnchangedS15Protocol`, but `/fchg` now reports a Gleisänderung (platform 12 -> 14).
-private final class ChangedS15Protocol: URLProtocol, @unchecked Sendable {
-    override class func canInit(with request: URLRequest) -> Bool { true }
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func startLoading() {
-        let path = request.url!.path
-        let body: Data
-        if path.contains("plan/") {
-            body = Data("""
-            <timetable station='Berlin Hbf'><s id="1"><tl c="S" n="15"/><dp pt="2701150900" pp="12"/></s></timetable>
-            """.utf8)
-        } else if path.contains("fchg/8011160") {
-            // `event(from:)` only builds an event when a time (planned or changed) is present, so a
-            // pure platform swap still needs `ct` — here unchanged from `pt`, i.e. no delay.
-            body = Data("""
-            <timetable station='Berlin Hbf'><s id="1"><dp ct="2701150900" cp="14"/></s></timetable>
-            """.utf8)
-        } else {
-            body = Data("<timetable></timetable>".utf8)
-        }
-        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: body)
-        client?.urlProtocolDidFinishLoading(self)
+/// Same schedule as `UnchangedS15Protocol`, but DB now reports a Gleisänderung (platform 12 -> 14) and no delay.
+private final class ChangedS15Protocol: OpenBoardsProtocol, @unchecked Sendable {
+    override class func answer(_ side: BoardSide, evas: [String], url: URL) -> (Int, String) {
+        guard side == .departure, evas.contains("8011160") else { return super.answer(side, evas: evas, url: url) }
+        return (200, OpenBoardsJSON.board(side, [
+            OpenBoardsJSON.item(.departure, "S", 15, line: "S15", at: "2027-01-15T09:00:00+01:00", live: "2027-01-15T09:00:00+01:00",
+                                platformSchedule: "12", platform: "14"),
+        ]))
     }
-    override func stopLoading() {}
 }
 
 /// Real-world scenario reported for the departure board at Berlin Gesundbrunnen: Transitous carries a
 /// platform for the U8 (U-Bahn) but not for the S15 (S-Bahn) on the very same board, even though DB's
-/// own IRIS schedule has the S15's. `fillMissingPlatforms(in:at:)` should fill only the actual gap and
+/// own board has the S15's. `fillMissingPlatforms(in:at:)` should fill only the actual gap and
 /// leave an entry that already has a platform untouched (and not fire a lookup for it at all).
-@Suite struct TimetablesBoardPlatformTests {
+@Suite struct OpenBoardsBoardPlatformTests {
     let gesundbrunnen = station("8011102", "Berlin Gesundbrunnen", 52.549, 13.391, source: .bahnDe)
-    // 2027-01-15 08:00 UTC == 09:00 Europe/Berlin (CET) -> IRIS "2701150900".
+    // 2027-01-15 08:00 UTC == 09:00 Europe/Berlin (CET).
     let departure = Date(timeIntervalSince1970: 1_800_000_000)
 
     func entry(line: Line, platform: PlatformInfo) -> BoardEntry {
@@ -7750,7 +7838,7 @@ private final class ChangedS15Protocol: URLProtocol, @unchecked Sendable {
         config.protocolClasses = [GesundbrunnenBoardProtocol.self]
         let session = URLSession(configuration: config)
         defer { session.invalidateAndCancel() }
-        let timetables = TimetablesClient(http: HTTPClient(session: session))
+        let timetables = OpenBoardsClient(http: HTTPClient(session: session))
 
         let u8 = entry(line: Line(name: "U8", number: "8", product: .subway, operatorName: nil),
                         platform: PlatformInfo(planned: "2", actual: nil))
@@ -7764,22 +7852,13 @@ private final class ChangedS15Protocol: URLProtocol, @unchecked Sendable {
     }
 }
 
-private final class GesundbrunnenBoardProtocol: URLProtocol, @unchecked Sendable {
-    override class func canInit(with request: URLRequest) -> Bool { true }
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func startLoading() {
-        let path = request.url!.path
-        let body: Data = path.contains("plan/")
-            ? Data("""
-              <timetable station='Berlin Gesundbrunnen'><s id="1"><tl c="S" n="15"/><dp pt="2701150900" pp="12"/></s></timetable>
-              """.utf8)
-            : Data("<timetable></timetable>".utf8)
-        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: body)
-        client?.urlProtocolDidFinishLoading(self)
+private final class GesundbrunnenBoardProtocol: OpenBoardsProtocol, @unchecked Sendable {
+    override class func answer(_ side: BoardSide, evas: [String], url: URL) -> (Int, String) {
+        guard side == .departure, evas == ["8011102"] else { return super.answer(side, evas: evas, url: url) }
+        return (200, OpenBoardsJSON.board(side, [
+            OpenBoardsJSON.item(.departure, "S", 15, line: "S15", at: "2027-01-15T09:00:00+01:00", platformSchedule: "12"),
+        ]))
     }
-    override func stopLoading() {}
 }
 
 @Suite struct BahnDeEvaNumberTests {
@@ -7787,9 +7866,9 @@ private final class GesundbrunnenBoardProtocol: URLProtocol, @unchecked Sendable
     /// search for "Berlin Gesundbrunnen" also returns two closely clustered, separately-EVA'd
     /// entrances ("Gesundbrunnen Bahnhof (S+U)" and "Gesundbrunnen Bahnhof Badstr.") a few hundred
     /// meters from the main station. `evaNumber(for:)` used to pick whichever was nearest by raw
-    /// coordinate distance, which landed on "610701" (Badstr.) - a sub-entrance with no Timetables
-    /// ("IRIS") schedule of its own - instead of the actual station EVA "8011102", silently making
-    /// every DB Timetables lookup for Gesundbrunnen come back empty. A name match must be preferred.
+    /// coordinate distance, which landed on "610701" (Badstr.) - a sub-entrance with no OpenBoards
+    /// board of its own - instead of the actual station EVA "8011102", silently making
+    /// every DB OpenBoards lookup for Gesundbrunnen come back empty. A name match must be preferred.
     @Test func prefersExactNameMatchOverNearerDecoyEntrance() async throws {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [GesundbrunnenSearchProtocol.self]
@@ -7828,69 +7907,86 @@ private final class GesundbrunnenSearchProtocol: URLProtocol, @unchecked Sendabl
     override func stopLoading() {}
 }
 
-@Suite struct TimetablesMatchTests {
+@Suite struct OpenBoardsMatchTests {
     /// DB files private operators' trains under the operator's code (National Express's RE1 is
-    /// `c="NX"`), and an ÖBB Railjet can be "RJ" in DB's feed but "ICE" in Transitous'.
-    static let plan = TimetablesXMLParser.parse(Data("""
-    <timetable station="Aachen Hbf">
-      <s id="nx"><tl t="p" o="NXRE" c="NX" n="26836"/><ar pt="2609301507" pp="2" l="RE1"/></s>
-      <s id="rj"><tl t="p" o="81" c="RJ" n="171"/><dp pt="2609301530" pp="6"/></s>
-      <s id="re"><tl t="p" o="800" c="RE" n="171"/><dp pt="2609301800" pp="3" l="RE9"/></s>
-    </timetable>
-    """.utf8))
+    /// category "NX"), and an ÖBB Railjet can be "RJ" in DB's feed but "ICE" in Transitous'.
+    static let arrivals = try! OpenBoardsParser.parse(Data(OpenBoardsJSON.board(.arrival, [
+        OpenBoardsJSON.item(.arrival, "NX", 26836, line: "RE1", at: "2026-09-30T15:07:00+02:00", platformSchedule: "2"),
+    ]).utf8), side: .arrival)
+    static let departures = try! OpenBoardsParser.parse(Data(OpenBoardsJSON.board(.departure, [
+        OpenBoardsJSON.item(.departure, "RJ", 171, at: "2026-09-30T15:30:00+02:00", platformSchedule: "6"),
+        OpenBoardsJSON.item(.departure, "RE", 171, line: "RE9", at: "2026-09-30T18:00:00+02:00", platformSchedule: "3"),
+    ]).utf8), side: .departure)
 
     static func time(_ hour: Int, _ minute: Int) -> Date {
         var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimetablesClient.berlin
+        calendar.timeZone = OpenBoardsClient.berlin
         return calendar.date(from: DateComponents(year: 2026, month: 9, day: 30, hour: hour, minute: minute))!
     }
 
     @Test func matchesPrivateOperatorByLineName() {
-        let stop = TimetablesClient.match(Self.plan, category: "RE", number: "26836", plannedTime: Self.time(15, 7), side: \.arrival)
-        #expect(stop?.id == "nx")
-        #expect(stop?.arrival?.plannedPlatform == "2")
+        let entry = OpenBoardsClient.match(Self.arrivals, category: "RE", number: "26836", plannedTime: Self.time(15, 7))
+        #expect(entry?.category == "NX")
+        #expect(entry?.event.plannedPlatform == "2")
     }
 
     @Test func matchesDifferentlyBrandedTrainByNumberAndTime() {
-        let stop = TimetablesClient.match(Self.plan, category: "ICE", number: "171", plannedTime: Self.time(15, 30), side: \.departure)
-        #expect(stop?.id == "rj")
-        #expect(TimetablesClient.match(Self.plan, category: "ICE", number: "172", plannedTime: Self.time(15, 30), side: \.departure) == nil)
-        #expect(TimetablesClient.match(Self.plan, category: "ICE", number: "171", plannedTime: Self.time(16, 30), side: \.departure) == nil)
+        let entry = OpenBoardsClient.match(Self.departures, category: "ICE", number: "171", plannedTime: Self.time(15, 30))
+        #expect(entry?.category == "RJ")
+        #expect(OpenBoardsClient.match(Self.departures, category: "ICE", number: "172", plannedTime: Self.time(15, 30)) == nil)
+        #expect(OpenBoardsClient.match(Self.departures, category: "ICE", number: "171", plannedTime: Self.time(16, 30)) == nil)
+    }
+
+    @Test func prefersTheTrainOfTheRightCategoryOverASameNumberedOne() {
+        // Two trains with the number 171 within the tolerance: the RE is the one asked for.
+        let both = try! OpenBoardsParser.parse(Data(OpenBoardsJSON.board(.departure, [
+            OpenBoardsJSON.item(.departure, "RJ", 171, at: "2026-09-30T18:00:00+02:00", platformSchedule: "6"),
+            OpenBoardsJSON.item(.departure, "RE", 171, at: "2026-09-30T18:01:00+02:00", platformSchedule: "3"),
+        ]).utf8), side: .departure)
+        #expect(OpenBoardsClient.match(both, category: "RE", number: "171", plannedTime: Self.time(18, 0))?.event.plannedPlatform == "3")
+    }
+
+    @Test func comparesTrainNumbersNumerically() {
+        #expect(OpenBoardsClient.sameNumber("0171", "171"))
+        #expect(!OpenBoardsClient.sameNumber("171", "172"))
     }
 }
 
-@Suite struct TimetablesMessageTests {
-    /// A `fchg` stop with a delay reason, a quality notice and a deleted message, as DB Navigator
-    /// shows them under "Aktuelle Informationen".
-    @Test func parsesDelayReasonsAndNotices() {
-        let xml = Data("""
-        <timetable station="Hamm(Westf)Hbf" eva="8000149">
-          <s id="-123-2409221000-5" eva="8000149">
-            <m id="r1" t="q" c="93" ts="2409221010"/>
-            <ar ct="2409221215">
-              <m id="r2" t="d" c="34" ts="2409221210"/>
-              <m id="r3" t="d" c="43" ts="2409221205" del="1"/>
-            </ar>
-          </s>
-        </timetable>
-        """.utf8)
+@Suite struct OpenBoardsMessageTests {
+    /// A stop with a delay reason and a quality notice, as DB Navigator shows them under "Aktuelle Informationen".
+    @Test func readsDelayReasonsAndNotices() throws {
+        let json = OpenBoardsJSON.board(.arrival, [
+            OpenBoardsJSON.item(.arrival, "ICE", 1, at: "2024-09-22T12:15:00+02:00", live: "2024-09-22T12:20:00+02:00", messages: [1, 2, 3]),
+        ], causes: [1: "34"], qualities: [2: "93", 3: "55"])
 
-        let stops = TimetablesXMLParser.parse(xml)
-        let messages = TimetablesMessage.resolve(stops.flatMap(\.messages))
+        let entries = try OpenBoardsParser.parse(Data(json.utf8), side: .arrival)
+        // 55 is a delay reason ("Reparatur an einem Signal" is 34), 93 a quality notice.
+        let messages = OpenBoardsMessage.resolve(entries.flatMap(\.event.messages))
 
-        #expect(stops.count == 1)
-        #expect(messages.map(\.text) == ["Keine behindertengerechte Einrichtung", "Reparatur an einem Signal"])
-        #expect(messages.map(\.kind) == [.notice, .delay])
+        #expect(entries.count == 1)
+        #expect(messages.map(\.text).contains("Reparatur an einem Signal"))
+        #expect(messages.map(\.text).contains("Keine behindertengerechte Einrichtung"))
+        #expect(messages.first { $0.text == "Keine behindertengerechte Einrichtung" }?.kind == .notice)
+        #expect(messages.first { $0.text == "Reparatur an einem Signal" }?.kind == .delay)
         #expect(messages.containsDelayReason)
+    }
+
+    /// A message id the answer has no code for is dropped, not shown as an empty note.
+    @Test func dropsMessagesWithoutACode() throws {
+        let json = OpenBoardsJSON.board(.arrival, [
+            OpenBoardsJSON.item(.arrival, "ICE", 1, at: "2024-09-22T12:15:00+02:00", messages: [7]),
+        ])
+        let entries = try OpenBoardsParser.parse(Data(json.utf8), side: .arrival)
+        #expect(entries.first?.event.messages.isEmpty == true)
     }
 
     /// "Keine Qualitätsmängel" clears the quality notices reported before it, and isn't shown itself.
     @Test func allClearRemovesOlderNotices() {
-        let messages = TimetablesMessage.resolve([
-            TimetablesMessage(code: 70, timestamp: Date(timeIntervalSince1970: 100)),
-            TimetablesMessage(code: 88, timestamp: Date(timeIntervalSince1970: 200)),
-            TimetablesMessage(code: 91, timestamp: Date(timeIntervalSince1970: 300)),
-            TimetablesMessage(code: 99, timestamp: Date(timeIntervalSince1970: 50)),
+        let messages = OpenBoardsMessage.resolve([
+            OpenBoardsMessage(code: 70, timestamp: Date(timeIntervalSince1970: 100)),
+            OpenBoardsMessage(code: 88, timestamp: Date(timeIntervalSince1970: 200)),
+            OpenBoardsMessage(code: 91, timestamp: Date(timeIntervalSince1970: 300)),
+            OpenBoardsMessage(code: 99, timestamp: Date(timeIntervalSince1970: 50)),
         ])
 
         #expect(messages.map(\.text) == ["Verzögerungen im Betriebsablauf", "Fahrradmitnahme nicht möglich"])
@@ -7929,7 +8025,7 @@ private enum PreviewLegs {
 
 /// Real-world case reported for RE 3318 (Lutherstadt Wittenberg → Pasewalk) on 2026-09-27:
 /// Transitous' realtime feed flagged Wittenberg–Zahna and the Pasewalk terminus as skipped, while
-/// DB's own IRIS feed had the train running from Wittenberg and arriving in Pasewalk as planned.
+/// DB's own boards had the train running from Wittenberg and arriving in Pasewalk as planned.
 /// DB's per-side status has to win over Transitous' single per-stop flag wherever DB knows the stop.
 @Suite struct StopCancellationTests {
     let wittenberg = station("8010222", "Lutherstadt Wittenberg Hbf")
@@ -7950,11 +8046,11 @@ private enum PreviewLegs {
                     direction: "Pasewalk", stopovers: stops, cancelled: false, remarks: [], source: .transitous)
     }
 
-    func client(_ protocolClass: URLProtocol.Type) -> (TimetablesClient, URLSession) {
+    func client(_ protocolClass: URLProtocol.Type) -> (OpenBoardsClient, URLSession) {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [protocolClass]
         let session = URLSession(configuration: config)
-        return (TimetablesClient(http: HTTPClient(session: session)), session)
+        return (OpenBoardsClient(http: HTTPClient(session: session)), session)
     }
 
     @Test func dbRunningLiftsTransitousSkippedStops() async {
@@ -7966,7 +8062,7 @@ private enum PreviewLegs {
         #expect(result.stopovers.allSatisfy { !$0.cancelled })
     }
 
-    /// IRIS reports a cancellation as a bare `cs="c"` with no time at all — it must still count.
+    /// A stop DB lists as cancelled counts, however its live time looks.
     @Test func dbCancellationWithoutTimeIsKept() async {
         let (timetables, session) = client(RE3318CancelledProtocol.self)
         defer { session.invalidateAndCancel() }
@@ -7989,8 +8085,8 @@ private enum PreviewLegs {
         #expect(stop.cancelled)
     }
 
-    /// Without `fchg` DB can't tell whether the train runs, so Transitous' verdict stands.
-    @Test func keepsTransitousCancellationWhenChangesAreUnavailable() async {
+    /// Without a board DB can't tell whether the train runs, so Transitous' verdict stands.
+    @Test func keepsTransitousCancellationWhenBoardsAreUnavailable() async {
         let (timetables, session) = client(RE3318NoChangesProtocol.self)
         defer { session.invalidateAndCancel() }
 
@@ -8013,45 +8109,32 @@ private enum PreviewLegs {
     }
 }
 
-/// IRIS `plan` for RE 3318 at Wittenberg (departure), Blönsdorf and Pasewalk (arrival only, the
-/// train terminates there). `fchg` is empty except for Pasewalk, which each subclass sets; `nil`
-/// makes every `fchg` request fail.
-private class RE3318Protocol: URLProtocol, @unchecked Sendable {
-    class var fchgPasewalk: String? { "<timetable></timetable>" }
+/// OpenBoards for RE 3318 at Wittenberg (departure), Blönsdorf and Pasewalk (arrival only, the train terminates
+/// there). Pasewalk's arrival is on time unless a subclass cancels it; `nil` makes every board request fail.
+private class RE3318Protocol: OpenBoardsProtocol, @unchecked Sendable {
+    class var pasewalkCancelled: Bool? { false }
 
-    override class func canInit(with request: URLRequest) -> Bool { true }
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func startLoading() {
-        let path = request.url!.path
-        var status = 200
-        let body: String
-        if path.contains("plan/8010222") {
-            body = #"<timetable><s id="3318-lw"><tl c="RE" n="3318"/><dp pt="2609271951" pp="1"/></s></timetable>"#
-        } else if path.contains("plan/8011210") {
-            body = #"<timetable><s id="3318-lbd"><tl c="RE" n="3318"/><ar pt="2609272008"/><dp pt="2609272009"/></s></timetable>"#
-        } else if path.contains("plan/8010268") {
-            body = #"<timetable><s id="3318-pw"><tl c="RE" n="3318"/><ar pt="2609272319" pp="1"/></s></timetable>"#
-        } else if path.contains("fchg/8010268") {
-            if let fchg = Self.fchgPasewalk { body = fchg } else { status = 500; body = "" }
-        } else if path.contains("fchg/"), Self.fchgPasewalk == nil {
-            status = 500; body = ""
-        } else {
-            body = "<timetable></timetable>"
+    override class func answer(_ side: BoardSide, evas: [String], url: URL) -> (Int, String) {
+        guard let cancelled = pasewalkCancelled else { return (500, "") }
+        switch (side, evas.first) {
+        case (.departure, "8010222"):
+            return (200, OpenBoardsJSON.board(side, [OpenBoardsJSON.item(.departure, "RE", 3318, at: "2026-09-27T19:51:00+02:00", platformSchedule: "1")]))
+        case (.arrival, "8011210"):
+            return (200, OpenBoardsJSON.board(side, [OpenBoardsJSON.item(.arrival, "RE", 3318, at: "2026-09-27T20:08:00+02:00")]))
+        case (.departure, "8011210"):
+            return (200, OpenBoardsJSON.board(side, [OpenBoardsJSON.item(.departure, "RE", 3318, at: "2026-09-27T20:09:00+02:00")]))
+        case (.arrival, "8010268"):
+            return (200, OpenBoardsJSON.board(side, [OpenBoardsJSON.item(.arrival, "RE", 3318, at: "2026-09-27T23:19:00+02:00", platformSchedule: "1", cancelled: cancelled)]))
+        default:
+            return super.answer(side, evas: evas, url: url)
         }
-        let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: Data(body.utf8))
-        client?.urlProtocolDidFinishLoading(self)
     }
-    override func stopLoading() {}
 }
 
 private final class RE3318RunningProtocol: RE3318Protocol, @unchecked Sendable {}
 
 private final class RE3318CancelledProtocol: RE3318Protocol, @unchecked Sendable {
-    override class var fchgPasewalk: String? {
-        #"<timetable station='Pasewalk'><s id="3318-pw"><ar cs="c" clt="2609271500"/></s></timetable>"#
-    }
+    override class var pasewalkCancelled: Bool? { true }
 }
 
 @Suite struct TransitLogoTests {
@@ -8326,7 +8409,7 @@ private final class RE3318CancelledProtocol: RE3318Protocol, @unchecked Sendable
         #expect(BahnDeClient.operators(byAdministration: toDecin, trainName: "RJ 383").isEmpty)
     }
 
-    /// RJ 383 on 2026-10-07: Transitous had no delay at Bad Schandau (and DB Timetables none either),
+    /// RJ 383 on 2026-10-07: Transitous had no delay at Bad Schandau (and DB's OpenBoards none either),
     /// bahn.de +57. Its live times win at the leg's ends and stops; a stop it doesn't know keeps its own.
     @Test func appliesBahnDeLiveTimes() throws {
         let details = try fixture("bahnde-fahrt-rj383", as: BahnDeClient.JourneyDetails.self)
@@ -8452,7 +8535,7 @@ private final class RE3318CancelledProtocol: RE3318Protocol, @unchecked Sendable
 }
 
 private final class RE3318NoChangesProtocol: RE3318Protocol, @unchecked Sendable {
-    override class var fchgPasewalk: String? { nil }
+    override class var pasewalkCancelled: Bool? { nil }
 }
 
 private final class HamburgBoardProtocol: URLProtocol, @unchecked Sendable {

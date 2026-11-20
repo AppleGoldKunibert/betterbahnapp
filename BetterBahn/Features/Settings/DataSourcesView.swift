@@ -2,7 +2,7 @@ import BetterBahnKit
 import SwiftUI
 
 /// Settings → Datenquellen: every service the app gets data from, with the attribution their terms ask for
-/// (Transitous sources, OSM + OpenRailwayMap with links, DB Timetables, DB FaSta and Open-Meteo under CC BY 4.0, operator logos).
+/// (Transitous sources, OSM + OpenRailwayMap with links, DB OpenBoards, DB FaSta and Open-Meteo under CC BY 4.0, operator logos).
 struct DataSourcesView: View {
     struct Source: Identifiable {
         let name: String
@@ -16,9 +16,8 @@ struct DataSourcesView: View {
         Source(name: "Transitous", usage: String(localized: "Verbindungen, Abfahrten, Fahrten und Bahnhofssuche"),
                url: URL(string: "https://transitous.org")!,
                license: (String(localized: "Quellen der Fahrplandaten"), URL(string: "https://transitous.org/sources/")!)),
-        Source(name: "Deutsche Bahn – DB Timetables", usage: String(localized: "Echtzeitdaten und Meldungen"),
-               url: URL(string: "https://developers.deutschebahn.com/db-api-marketplace/apis/product/timetables")!,
-               license: (String(localized: "Lizenz: CC BY 4.0"), URL(string: "https://creativecommons.org/licenses/by/4.0/deed.de")!)),
+        Source(name: "Deutsche Bahn – DB OpenBoards", usage: String(localized: "Echtzeitdaten und Meldungen"),
+               url: URL(string: "https://developers.deutschebahn.com/db-api-marketplace/apis/product/open-boards")!),
         Source(name: "Deutsche Bahn – FaSta", usage: String(localized: "Aufzüge außer Betrieb"),
                url: URL(string: "https://developers.deutschebahn.com/db-api-marketplace/apis/product/fasta")!,
                license: (String(localized: "Lizenz: CC BY 4.0"), URL(string: "https://creativecommons.org/licenses/by/4.0/deed.de")!)),

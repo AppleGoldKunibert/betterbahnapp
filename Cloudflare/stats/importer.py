@@ -38,7 +38,7 @@ LONG_DISTANCE = {"ICE", "IC", "EC", "ECE", "EN", "NJ", "RJ", "RJX", "TGV", "FLX"
 MAX_STATEMENT = 90_000
 # Not kept: S-Bahn and buses (as in the app, which asks only for regional and long-distance trains).
 EXCLUDED_CATEGORIES = {"S", "BUS", "SEV", "STR", "U"}
-# Big stations whose lower levels DB Timetables lists as stations of their own (as `TimetablesClient.lowerLevels`
+# Big stations whose lower levels DB Timetables lists as stations of their own (as `OpenBoardsClient.lowerLevels`
 # in the app): their stops are kept under the main station, which is what the app asks for. Same list in worker.mjs.
 LOWER_LEVELS = {
     "8098263": "8000261",  # München Hbf (tief)

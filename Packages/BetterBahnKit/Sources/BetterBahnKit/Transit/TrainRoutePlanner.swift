@@ -55,7 +55,7 @@ public struct TrainRoutePlanner: Sendable {
     /// DB's own dispatching plan, consulted when a named train can't be matched on `provider`'s own
     /// board – its coverage or branding can miss a train that genuinely exists. Optional: without
     /// a Timetables client, the planner still works, just without that rescue.
-    public let timetables: TimetablesClient?
+    public let timetables: OpenBoardsClient?
     /// How many partial routes to carry from one requirement to the next.
     public var beamWidth: Int
     /// Upper bound on the stops tried when no exit station was given (keeps request counts sane).
@@ -67,7 +67,7 @@ public struct TrainRoutePlanner: Sendable {
     /// Minimum time between getting off one train and the next one departing.
     public var minTransfer: TimeInterval
 
-    public init(provider: CombinedProvider, timetables: TimetablesClient? = nil, beamWidth: Int = 3,
+    public init(provider: CombinedProvider, timetables: OpenBoardsClient? = nil, beamWidth: Int = 3,
                 maxAlightCandidates: Int = 8, branchFactor: Int = 2, windowMinutes: Int = 480, minTransferMinutes: Int = 3) {
         self.provider = provider
         self.timetables = timetables
@@ -340,12 +340,12 @@ public struct TrainRoutePlanner: Sendable {
     /// not cancelled is the entry kept; if it can't tell, the provider's verdict stands.
     private func cancellationDisputed(_ entry: BoardEntry, at station: Station) async -> Bool {
         guard let timetables, let number = entry.line.dispatchNumber,
-              let category = TimetablesClient.category(from: entry.line.name) else { return false }
+              let category = OpenBoardsClient.category(from: entry.line.name) else { return false }
         return await timetables.departureCancelled(category: category, number: number, at: station,
                                                    plannedTime: entry.time.planned) == false
     }
 
-    /// When nothing in `entries` matched by name, asks DB's own dispatching plan (`TimetablesClient`)
+    /// When nothing in `entries` matched by name, asks DB's own dispatching plan (`OpenBoardsClient`)
     /// for the train's real scheduled time – its board can brand a train differently (e.g. an ÖBB "RJ"
     /// that DB calls "ICE") or simply not carry it at all – and treats whichever board entry departs
     /// closest to that confirmed time as it, so its trip can still be built from `provider`, which

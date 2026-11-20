@@ -84,7 +84,7 @@ struct TripView: View {
         }
         .onDisappear { model.closeLoadedLaps(lapsKey) }
         .refreshable {
-            await TimetablesClient.invalidateDelays()
+            await OpenBoardsClient.invalidateDelays()
             await load()
         }
     }

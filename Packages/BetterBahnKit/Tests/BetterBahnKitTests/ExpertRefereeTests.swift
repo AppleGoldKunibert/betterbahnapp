@@ -2,8 +2,8 @@ import Foundation
 import Testing
 @testable import BetterBahnKit
 
-/// Where bahn.de and DB Timetables disagree on a stop, bahn.expert is asked which one is right: the value
-/// closer to bahn.expert's stays, DB Timetables' on a tie.
+/// Where bahn.de and DB OpenBoards disagree on a stop, bahn.expert is asked which one is right: the value
+/// closer to bahn.expert's stays, DB OpenBoards' on a tie.
 struct ExpertRefereeTests {
     let now = Date(timeIntervalSince1970: 1_790_000_000)
 
@@ -37,7 +37,7 @@ struct ExpertRefereeTests {
     }
 
     @Test func theValueCloserToBahnExpertStays() {
-        // RE 3 3354: DB Timetables +19, bahn.de +7. bahn.expert agrees with DB.
+        // RE 3 3354: DB OpenBoards +19, bahn.de +7. bahn.expert agrees with DB.
         #expect(apply(timetables: 19, bahnDe: 7, expert: 19) == 19)
         // bahn.expert agrees with bahn.de: it wins here.
         #expect(apply(timetables: 19, bahnDe: 7, expert: 7) == 7)
@@ -46,12 +46,12 @@ struct ExpertRefereeTests {
         #expect(apply(timetables: 19, bahnDe: 7, expert: 16) == 19)
     }
 
-    @Test func aTieStaysWithDBTimetables() {
+    @Test func aTieStaysWithDBOpenBoards() {
         #expect(apply(timetables: 19, bahnDe: 7, expert: 13) == 19)
     }
 
-    @Test func anOnTimeStopDBTimetablesInferredGivesWayToBahnDeOnlyIfBahnExpertAgrees() {
-        // DB Timetables has no change for the stop (on time), bahn.de has +7.
+    @Test func anOnTimeStopDBOpenBoardsInferredGivesWayToBahnDeOnlyIfBahnExpertAgrees() {
+        // DB OpenBoards has no change for the stop (on time), bahn.de has +7.
         #expect(apply(timetables: 0, bahnDe: 7, expert: 7) == 7)
         #expect(apply(timetables: 0, bahnDe: 7, expert: 0) == 0)
         // Without bahn.expert's answer the rule is the one before: bahn.de fills an on-time stop.
@@ -87,13 +87,13 @@ struct ExpertRefereeTests {
         #expect(result.arrival.delayMinutes == 7)
     }
 
-    @Test func recognisesWhenBahnDeAndDBTimetablesDisagree() {
+    @Test func recognisesWhenBahnDeAndDBOpenBoardsDisagree() {
         let own = [stopover("a", 0, delay: 19), stopover("b", 10, delay: 5)]
         #expect(BahnDeClient.disagrees([bahnDeStop("a", 0, delay: 7)], with: own))
         // Within a minute is the same time; a stop bahn.de doesn't know can't disagree.
         #expect(!BahnDeClient.disagrees([bahnDeStop("a", 0, delay: 19), bahnDeStop("b", 10, delay: 5)], with: own))
         #expect(!BahnDeClient.disagrees([bahnDeStop("c", 0, delay: 7)], with: own))
-        // Nothing to disagree about while DB Timetables has no time for the stop.
+        // Nothing to disagree about while DB OpenBoards has no time for the stop.
         #expect(!BahnDeClient.disagrees([bahnDeStop("a", 0, delay: 7)], with: [stopover("a", 0, delay: nil)]))
     }
 

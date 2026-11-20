@@ -9,7 +9,7 @@ import Foundation
 /// The order, with each source's own rules unchanged:
 /// 1. Transitous: the stops another feed's copy of the train has (`TwinTrainStops.swift`).
 /// 2. DB Timetables: delays, cancellations, notices and missing platforms, as long as DB still lists the train
-///    (`TimetablesClient.knowsChanges`); a stop without a change counts as on time only within 2 hours of
+///    (`OpenBoardsClient.knowsChanges`); a stop without a change counts as on time only within 2 hours of
 ///    departure (`infersOnTime`).
 /// 3. bahn.de's journey details: Zusatzhalte, live times (not over a delay DB Timetables set, bahn.expert as
 ///    the referee where the two differ), platforms, sleeping cars. Asked for a run underway or departing
@@ -28,9 +28,9 @@ import Foundation
 /// even for a moment.
 public struct LiveRun: Sendable {
     let provider: CombinedProvider
-    let timetables: TimetablesClient?
+    let timetables: OpenBoardsClient?
 
-    public init(provider: CombinedProvider, timetables: TimetablesClient? = nil) {
+    public init(provider: CombinedProvider, timetables: OpenBoardsClient? = nil) {
         self.provider = provider
         self.timetables = timetables
     }
@@ -131,7 +131,7 @@ public struct LiveRun: Sendable {
         }
         guard let timetables, timetables.canLookUp(run.line),
               let last = run.stopovers.last.flatMap({ $0.arrival?.planned ?? $0.departure?.planned }),
-              TimetablesClient.knowsChanges(until: last, now: now) else { return (run, false) }
+              OpenBoardsClient.knowsChanges(until: last, now: now) else { return (run, false) }
         // DB Timetables wins wherever it knows the stop; its delays stay where bahn.de's forecast differs.
         return (await timetables.liveTrip(run, now: now), true)
     }
@@ -199,12 +199,12 @@ public struct LiveRun: Sendable {
         return !pairs.isEmpty && pairs.allSatisfy { $0.0 == $0.1 }
     }
 
-    /// A baseline saved before `TimetablesClient.infersOnTime` existed, or long before the train runs, carries DB's
+    /// A baseline saved before `OpenBoardsClient.infersOnTime` existed, or long before the train runs, carries DB's
     /// made-up "on time" (actual == planned) for a run hours ahead. Dropped while the train is still that far off,
     /// so it can't fill a gap; a real live time comes back from the sources (see `JourneyRefresher.droppingInferredOnTime`).
     static func droppingInferredOnTime(_ trip: Trip, now: Date) -> Trip {
         guard let start = trip.stopovers.first.flatMap({ $0.departure?.planned ?? $0.arrival?.planned }),
-              !TimetablesClient.infersOnTime(departing: start, now: now) else { return trip }
+              !OpenBoardsClient.infersOnTime(departing: start, now: now) else { return trip }
         var trip = trip
         for index in trip.stopovers.indices {
             if trip.stopovers[index].arrival?.actual == trip.stopovers[index].arrival?.planned { trip.stopovers[index].arrival?.actual = nil }

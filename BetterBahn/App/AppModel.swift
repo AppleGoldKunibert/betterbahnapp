@@ -252,11 +252,11 @@ final class AppModel {
 
     var trainPicker: TrainPicker { TrainPicker(provider: provider) }
 
-    var journeyReplanner: JourneyReplanner { JourneyReplanner(provider: provider, timetables: timetablesClient) }
+    var journeyReplanner: JourneyReplanner { JourneyReplanner(provider: provider, timetables: openBoardsClient) }
 
     var dbShareImporter: DBShareImporter { DBShareImporter(provider: provider, bahnDe: provider.bahnDe ?? BahnDeClient()) }
 
-    var trainRoutePlanner: TrainRoutePlanner { TrainRoutePlanner(provider: provider, timetables: timetablesClient) }
+    var trainRoutePlanner: TrainRoutePlanner { TrainRoutePlanner(provider: provider, timetables: openBoardsClient) }
 
     /// Rules for the "only valid with my ticket" filters, for the ticket picked in the settings.
     var ticketFilter: TicketFilter {
@@ -269,14 +269,14 @@ final class AppModel {
     /// Overlays fresher delay/platform data straight from DB onto legs, through BetterBahn's proxy
     /// (which holds the API key). `nil` where the app can't prove it's genuine (no App Attest, e.g.
     /// in the Simulator), since the proxy refuses those requests.
-    var timetablesClient: TimetablesClient? {
+    var openBoardsClient: OpenBoardsClient? {
         guard WorkerAuth.shared.isSupported else { return nil }
-        return TimetablesClient()
+        return OpenBoardsClient()
     }
 
-    var journeyRefresher: JourneyRefresher { JourneyRefresher(provider: provider, timetables: timetablesClient) }
+    var journeyRefresher: JourneyRefresher { JourneyRefresher(provider: provider, timetables: openBoardsClient) }
     /// Loads a train run's live data for the trip views, the same way `journeyRefresher` does for a leg.
-    var liveRun: LiveRun { LiveRun(provider: provider, timetables: timetablesClient) }
+    var liveRun: LiveRun { LiveRun(provider: provider, timetables: openBoardsClient) }
 
     /// Whether `journey` was already loaded with live data: saved (refreshed in the background, also
     /// right after launch) or opened or prepared before. Only an unseen one waits for live data.

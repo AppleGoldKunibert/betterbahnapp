@@ -61,7 +61,7 @@ public struct LiveActivityPushJourney: Codable, Sendable, Equatable {
     public init(_ journey: Journey, eva: (Station) -> String? = LiveActivityPushJourney.evaNumber(for:)) {
         legs = journey.transitLegs.map { leg in
             let line = leg.line
-            let category = line.flatMap { TimetablesClient.category(from: $0.name) }
+            let category = line.flatMap { OpenBoardsClient.category(from: $0.name) }
             let number = line?.dispatchNumber
             let lookup = category != nil && number != nil
             return Leg(line: line?.name ?? "Zug", category: lookup ? category : nil, number: lookup ? number : nil,
@@ -77,7 +77,7 @@ public struct LiveActivityPushJourney: Codable, Sendable, Equatable {
     }
 
     /// The station's EVA number from the station itself or the offline list; for a station with several
-    /// levels the main one, whose lower levels the Worker knows (as `TimetablesClient.lowerLevels`).
+    /// levels the main one, whose lower levels the Worker knows (as `OpenBoardsClient.lowerLevels`).
     public static func evaNumber(for station: Station) -> String? {
         station.evaNumber ?? StationNames.evaNumber(for: station) ?? StationNames.mainEvaNumber(for: station)
     }
