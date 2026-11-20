@@ -1,8 +1,8 @@
 import Foundation
 
-/// How often the live positions of running trains are fetched from bahn.jetzt while a map shows them.
-/// Each fetch downloads bahn.jetzt's full list of every running train (~250 KB), so shorter intervals
-/// use noticeably more data.
+/// How often the live positions of running trains are fetched while a map shows them.
+/// Each fetch downloads the full list of every running train (~40 KB from our Worker, ~250 KB from
+/// bahn.jetzt when it falls back), so shorter intervals use noticeably more data.
 public enum TrainPositionRefresh: String, CaseIterable, Codable, Sendable {
     /// Every 15 seconds, or every minute on mobile data or in Low Data Mode.
     case automatic

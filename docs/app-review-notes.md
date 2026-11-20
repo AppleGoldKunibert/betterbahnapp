@@ -67,10 +67,12 @@ features or data flows change (and update the privacy policy in `Cloudflare/work
 
 - bahn.de, bahn.expert and bahn.jetzt are used without a written agreement (guideline 5.2.2); the
   proxy also sends browser user agents. Ask DB / the operators for permission if App Review asks.
+  Live train positions come from DB's RIS::Maps under our DB API Marketplace subscription (Worker
+  `betterbahn-positions`, the key stays on the server); bahn.jetzt is only the fallback.
 - vagonweb.cz (planned Wagenreihung, train types) is used with the permission of vagonweb (issue #95);
   keep that email in case App Review asks. The app credits it ("Daten: vagonweb.cz").
 - Attribution (#103): Settings → Datenquellen lists every service with links (Transitous sources,
-  DB Timetables and DB FaSta under CC BY 4.0, OpenStreetMap, OpenRailwayMap, bahn.de, vagonweb, bahn.expert,
+  DB Timetables and DB FaSta under CC BY 4.0, DB RIS::Maps, OpenStreetMap, OpenRailwayMap, bahn.de, vagonweb, bahn.expert,
   bahn.jetzt, Träwelling, zug.network for check-in emojis, Open-Meteo under CC BY 4.0 for the weather, #385, also credited in
   the weather popover); the map legend links OSM and OpenRailwayMap. All requests except the
   bahn.de proxy send `HTTPClient.identifyingUserAgent` (app version + `/support` contact).
