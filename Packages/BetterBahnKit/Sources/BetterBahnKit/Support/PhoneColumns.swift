@@ -10,4 +10,21 @@ public enum PhoneColumns {
     public static func fit(width: Double, height: Double) -> Bool {
         min(width, height) >= narrowestSide
     }
+
+    /// What a phone window is told about its width.
+    public enum Width: Equatable, Sendable {
+        /// Wide: two columns.
+        case regular
+        /// Narrow: one column, also where iOS would call the window wide.
+        case compact
+        /// Whatever iOS says.
+        case system
+    }
+
+    /// Two columns where they fit; one where the window is narrower than two columns need, as next to another app on
+    /// the unfolded Duo, which iOS calls wide when the device is sideways (#579). Otherwise iOS decides.
+    public static func width(width: Double, height: Double) -> Width {
+        if fit(width: width, height: height) { return .regular }
+        return width < narrowestSide ? .compact : .system
+    }
 }
