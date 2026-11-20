@@ -854,6 +854,9 @@ struct LegCard: View {
     @State private var occupancy: OccupancyForecast?
     /// Which side the platform is on where this leg ends (#394), if the offline list knows.
     @State private var exitSide: ExitSide?
+    /// The trains this train's trainset ran as before and runs as after it (#501): shown where the leg starts at the
+    /// train's first stop or ends at its last.
+    @State private var turnaround: TzTurnaround?
     @Environment(AppModel.self) private var model
     @Environment(\.bikeMode) private var bikeMode
     @Environment(\.appDesign) private var design
@@ -924,7 +927,12 @@ struct LegCard: View {
 
                 VStack(spacing: 0) {
                     TimelineNode(kind: .major, color: color, lineBelow: color) {
-                        stationRow(time: leg.departure, name: leg.origin.displayName, platform: leg.departurePlatform)
+                        VStack(alignment: .leading, spacing: 6) {
+                            stationRow(time: leg.departure, name: leg.origin.displayName, platform: leg.departurePlatform)
+                            if let turnaround, turnaround.startsWith(leg) {
+                                TrainTurnaroundLinks(trains: turnaround.previous, side: .from).padding(.leading, 64)
+                            }
+                        }
                     }
 
                     if !intermediate.isEmpty {
@@ -982,8 +990,13 @@ struct LegCard: View {
                     }
 
                     TimelineNode(kind: .major, color: color, lineAbove: color) {
-                        stationRow(time: leg.arrival, name: leg.destination.displayName, platform: leg.arrivalPlatform,
-                                   weather: arrivalWeather, exitSide: exitSide)
+                        VStack(alignment: .leading, spacing: 6) {
+                            stationRow(time: leg.arrival, name: leg.destination.displayName, platform: leg.arrivalPlatform,
+                                       weather: arrivalWeather, exitSide: exitSide)
+                            if let turnaround, turnaround.endsWith(leg) {
+                                TrainTurnaroundLinks(trains: turnaround.next, side: .to).padding(.leading, 64)
+                            }
+                        }
                     }
 
                     // Between the stops and "Mehr"; unfolds by itself around the departure.
@@ -1083,6 +1096,7 @@ struct LegCard: View {
             // The ticket's rounded type for the train, the stations and the times.
             .fontDesign(design == .fahrkarte ? .rounded : nil)
         }
+        .trainTurnaround(line: leg.line, date: leg.departure.planned, into: $turnaround)
         .sheet(isPresented: $showFullTrip) {
             LegTripSheet(leg: leg)
         }
