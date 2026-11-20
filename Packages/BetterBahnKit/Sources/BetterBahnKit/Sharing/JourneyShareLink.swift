@@ -20,7 +20,7 @@ public enum JourneyShareLink {
 
     /// The journey as zlib-compressed JSON in base64url: the long link's `data`, and what the Worker stores.
     public static func payload(for journey: Journey) -> String? {
-        guard let json = try? JSONEncoder().encode(journey),
+        guard let json = try? JSONEncoder().encode(journey.addingEvaNumbers()),
               let compressed = try? (json as NSData).compressed(using: .zlib) as Data? else { return nil }
         return base64URLEncode(compressed)
     }
@@ -105,5 +105,28 @@ public enum JourneyShareLink {
             .replacingOccurrences(of: "_", with: "/")
         while base64.count % 4 != 0 { base64.append("=") }
         return Data(base64Encoded: base64)
+    }
+}
+
+extension Journey {
+    /// The journey with the EVA number of every station that has none, from the offline list (`StationNames`, for
+    /// a station with several levels the main one): Transitous stops carry none, and the share page's Worker asks
+    /// DB's IRIS for live times by EVA number. Only for the shared copy, the saved journey stays as it is.
+    func addingEvaNumbers() -> Journey {
+        func filled(_ station: Station) -> Station {
+            guard station.evaNumber == nil, let eva = ArrivalShare.evaNumber(of: station) else { return station }
+            var station = station
+            station.evaNumber = eva
+            return station
+        }
+        var journey = self
+        for index in journey.legs.indices where !journey.legs[index].isWalking {
+            journey.legs[index].origin = filled(journey.legs[index].origin)
+            journey.legs[index].destination = filled(journey.legs[index].destination)
+            for stop in journey.legs[index].stopovers.indices {
+                journey.legs[index].stopovers[stop].station = filled(journey.legs[index].stopovers[stop].station)
+            }
+        }
+        return journey
     }
 }
