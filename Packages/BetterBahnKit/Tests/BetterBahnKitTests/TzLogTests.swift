@@ -36,6 +36,19 @@ import Testing
         #expect(!turnaround.isEmpty && TzTurnaround.none.isEmpty)
     }
 
+    /// #501: a leg's line is asked for by its train and the day it departs in Germany; other lines aren't asked at all.
+    @Test func turnaroundOfALineAsksForItsTrainAndGermanDay() async throws {
+        let ice = Line(name: "ICE 592", number: "592", product: .highSpeed, operatorName: nil)
+        let lateEvening = try #require(ISO8601DateFormatter().date(from: "2026-11-02T23:30:00Z"))  // 00:30 on the 3rd in Germany
+        let turnaround = try await client.turnaround(for: ice, on: lateEvening)
+        #expect(TzLogProtocol.lastQuery == "category=ICE&number=592&day=2026-11-03")
+        #expect(turnaround.previous.map(\.name) == ["ICE 567"])
+
+        let regional = Line(name: "RE 5", number: "5", product: .regional, operatorName: nil)
+        #expect(try await client.turnaround(for: regional, on: lateEvening).isEmpty)
+        #expect(try await client.turnaround(for: nil, on: lateEvening).isEmpty)
+    }
+
     /// The log's days are Germany's: just after midnight there it is already the next day, though not in UTC.
     @Test func daysAreGermanyDays() throws {
         let lateEvening = try #require(ISO8601DateFormatter().date(from: "2026-10-31T23:30:00Z"))
@@ -155,5 +168,45 @@ final class TzLogProtocol: URLProtocol, @unchecked Sendable {
         #expect(TzSearch.description(of: 1)?.number == nil)
         #expect(TzSearch.matches("Tz 8043").first?.detail?.hasPrefix("ICE 3neo") == true)
         #expect(TzDescription(number: 8043).title == "Tz 8043")
+    }
+}
+
+/// Where "Wendet aus" and "Wendet zu" go on a leg: only at the train's own first and last stop.
+@Suite struct TzTurnaroundPlacementTests {
+    private let start = Date(timeIntervalSince1970: 1_800_000_000)
+
+    private func stop(_ eva: String, _ name: String) -> Station {
+        Station(id: eva, name: name, coordinate: nil, evaNumber: eva, source: .bahnDe)
+    }
+
+    private func leg(from: Station, to: Station, departure: Date, direction: String?) -> Leg {
+        Leg(origin: from, destination: to, departure: TimeInfo(planned: departure, actual: nil),
+            arrival: TimeInfo(planned: departure.addingTimeInterval(3600), actual: nil), departurePlatform: nil,
+            arrivalPlatform: nil, tripId: "t", line: Line(name: "ICE 592", number: "592", product: .highSpeed, operatorName: nil),
+            direction: direction, isWalking: false, cancelled: false, stopovers: [], remarks: [], source: .transitous)
+    }
+
+    private var turnaround: TzTurnaround {
+        TzTurnaround(tz: "8043", start: start, startEva: "8002549",
+                     previous: [.init(day: "2026-11-03", category: "ICE", number: 567, start: nil, startEva: nil)],
+                     next: [.init(day: "2026-11-03", category: "ICE", number: 1501, start: nil, startEva: "8000207")])
+    }
+
+    @Test func aLegFromTheFirstStopShowsWhereTheTrainCameFrom() {
+        let hamburg = stop("8002549", "Hamburg Hbf"), hannover = stop("8000152", "Hannover Hbf")
+        #expect(turnaround.startsWith(leg(from: hamburg, to: hannover, departure: start, direction: "Köln Hbf")))
+        // Boarding on the way: neither the start time nor the first station.
+        #expect(!turnaround.startsWith(leg(from: hannover, to: stop("8000207", "Köln Hbf"),
+                                           departure: start.addingTimeInterval(5400), direction: "Köln Hbf")))
+    }
+
+    @Test func aLegToTheLastStopShowsWhereTheTrainGoesOn() {
+        let hannover = stop("8000152", "Hannover Hbf"), koeln = stop("8000207", "Köln Hbf")
+        #expect(turnaround.endsWith(leg(from: hannover, to: koeln, departure: start, direction: nil)))
+        #expect(!turnaround.endsWith(leg(from: stop("8002549", "Hamburg Hbf"), to: hannover, departure: start, direction: "Köln Hbf")))
+        // The next train's start unknown: the direction says it ends there.
+        var unknown = turnaround
+        unknown.next[0].startEva = nil
+        #expect(unknown.endsWith(leg(from: hannover, to: koeln, departure: start, direction: "Köln Hbf")))
     }
 }
