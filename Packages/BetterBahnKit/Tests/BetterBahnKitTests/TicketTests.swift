@@ -1,4 +1,6 @@
+#if canImport(CoreImage)
 import CoreImage
+#endif
 import Foundation
 import Testing
 @testable import BetterBahnKit
@@ -212,12 +214,14 @@ import Testing
     /// Every possible byte, like the binary (zlib-compressed) payload of a UIC ticket barcode.
     private let binaryPayload = Data((0...255).map(UInt8.init) + (0...255).reversed().map(UInt8.init))
 
+    #if canImport(CoreImage)
     @Test func readsAztecBytesFromPDF() throws {
         let pdf = try #require(Self.pdf(withAztec: binaryPayload))
         let barcode = try #require(TicketBarcodeReader.barcode(inPDF: pdf))
         #expect(barcode.payload == binaryPayload)
         #expect(barcode.image != nil)
     }
+    #endif
 
     @Test func walletPassKeepsEveryByte() throws {
         var ticket = try tickets()[0]
@@ -238,6 +242,7 @@ import Testing
         #expect(pass.boardingPass.transitType == "PKTransitTypeGeneric")
     }
 
+    #if canImport(CoreImage)
     /// An A4 PDF with `payload` as an Aztec code, like DB's ticket.
     static func pdf(withAztec payload: Data) -> Data? {
         let filter = CIFilter(name: "CIAztecCodeGenerator")!
@@ -254,4 +259,5 @@ import Testing
         context.closePDF()
         return data as Data
     }
+    #endif
 }

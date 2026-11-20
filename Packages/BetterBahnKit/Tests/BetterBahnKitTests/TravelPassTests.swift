@@ -1,4 +1,6 @@
+#if canImport(CoreImage)
 import CoreImage
+#endif
 import Foundation
 import Testing
 @testable import BetterBahnKit
@@ -69,6 +71,7 @@ import Testing
         }
     }
 
+    #if canImport(CoreImage)
     @Test func readsBarcodeFromScreenshot() throws {
         let payload = try payload("uic-dticket-bc100")
         let image = try #require(Self.screenshot(withAztec: payload))
@@ -76,6 +79,7 @@ import Testing
         #expect(barcode.payload == payload)
         #expect(try TravelPass(barcode: barcode).name == "Deutschland-Ticket")
     }
+    #endif
 
     @Test func keepsOnlyTheCodeFromScreenshot() throws {
         let payload = try payload("uic-dticket-bc100")
@@ -123,6 +127,7 @@ import Testing
         }
     }
 
+    #if canImport(CoreImage)
     /// A phone-sized PNG with `payload` as an Aztec code on white, like a DB Navigator screenshot.
     static func screenshot(withAztec payload: Data) -> Data? {
         let filter = CIFilter(name: "CIAztecCodeGenerator")!
@@ -137,6 +142,7 @@ import Testing
         context.draw(code, in: CGRect(x: 70, y: 1100, width: 1040, height: 1040))
         return context.makeImage().flatMap(TicketBarcodeReader.png)
     }
+    #endif
 }
 
 private final class UnverifiedBarcodeProtocol: URLProtocol, @unchecked Sendable {

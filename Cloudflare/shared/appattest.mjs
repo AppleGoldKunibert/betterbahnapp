@@ -6,8 +6,13 @@
 // 2. POST /auth/attest { keyId, attestation, challenge } → { keyToken }   (once per app install)
 // 3. POST /auth/token  { keyToken, assertion, challenge } → { token, expiresIn }
 //
+// The Android app gets the same token with Play Integrity instead of steps 2 and 3:
+//    POST /auth/play { integrityToken, challenge }      → { token, expiresIn }   (./playintegrity.mjs)
+//
 // Requests then carry the token as `X-BetterBahn-Token`. The app's side is `WorkerAuth` in
 // BetterBahnKit. Checks follow Apple's "Validating apps that connect to your server".
+
+import { verifyPlayIntegrity } from "./playintegrity.mjs";
 
 export const TOKEN_HEADER = "X-BetterBahn-Token";
 export const CHALLENGE_TTL = 5 * 60;
@@ -50,7 +55,7 @@ function json(status, body) {
 }
 
 /// Answers `/auth/…`, or null for any other path.
-export async function handleAuth(request, env = {}, now = Date.now()) {
+export async function handleAuth(request, env = {}, now = Date.now(), fetchImpl = fetch) {
     const url = new URL(request.url);
     if (!url.pathname.startsWith("/auth/")) return null;
     const appIds = (env.APP_IDS ?? "").split(",").map(id => id.trim()).filter(Boolean);
@@ -62,8 +67,9 @@ export async function handleAuth(request, env = {}, now = Date.now()) {
         const challenge = await signToken({ t: "c", n: nonce, exp: Math.floor(now / 1000) + CHALLENGE_TTL }, env.TOKEN_SECRET);
         return json(200, { challenge });
     }
-    if (url.pathname !== "/auth/attest" && url.pathname !== "/auth/token") return json(404, { error: "not_found" });
+    if (!["/auth/attest", "/auth/token", "/auth/play"].includes(url.pathname)) return json(404, { error: "not_found" });
     if (request.method !== "POST") return json(405, { error: "method_not_allowed" });
+    if (url.pathname === "/auth/play" && !env.PLAY_INTEGRITY_KEY) return json(503, { error: "not_configured" });
 
     const body = await request.arrayBuffer();
     if (body.byteLength > MAX_BODY_BYTES) return json(413, { error: "too_large" });
@@ -73,9 +79,8 @@ export async function handleAuth(request, env = {}, now = Date.now()) {
     } catch {
         return json(400, { error: "invalid_json" });
     }
-    if (!input || typeof input.challenge !== "string" || !(await verifyToken(input.challenge, "c", env.TOKEN_SECRET, now))) {
-        return json(400, { error: "invalid_challenge" });
-    }
+    const issued = input && typeof input.challenge === "string" && await verifyToken(input.challenge, "c", env.TOKEN_SECRET, now);
+    if (!issued) return json(400, { error: "invalid_challenge" });
 
     if (url.pathname === "/auth/attest") {
         try {
@@ -90,6 +95,19 @@ export async function handleAuth(request, env = {}, now = Date.now()) {
         } catch {
             return json(403, { error: "attestation_failed" });
         }
+    }
+
+    if (url.pathname === "/auth/play") {
+        try {
+            await verifyPlayIntegrity({ integrityToken: input.integrityToken, challenge: input.challenge, env, now, fetchImpl });
+        } catch {
+            return json(403, { error: "integrity_failed" });
+        }
+        // Play Integrity has no key per installation: the challenge's nonce stands in, so the bahn.de server's rate
+        // limit (per `kid`) counts each token on its own instead of all Android devices together.
+        const token = await signToken({ t: "a", kid: `play:${issued.n}`, exp: Math.floor(now / 1000) + TOKEN_TTL },
+            env.TOKEN_SECRET);
+        return json(200, { token, expiresIn: TOKEN_TTL });
     }
 
     // A key token that no longer verifies (e.g. TOKEN_SECRET rotated) makes the app attest a new key.
