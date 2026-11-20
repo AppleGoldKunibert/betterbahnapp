@@ -72,7 +72,7 @@ in `project.pbxproj`: new files join their target automatically.
   a map shows (Kit `TrainPositionRefresh`: 15 s, 60 s on mobile data/Low Data Mode, "Aus" loads once); delay
   notifications, geometry/heatmap caches, Live Activity selection. Defines `SavedJourney`, `PlanVersion`,
   `ImportedTrip`, `RecentSearch`, `Storage`, `AppSettings`, `ConnectionNotifier`. `SavedJourney.formations` keeps
-  the Tz/Taufname seen per leg (`Leg.formationKey`, `rememberFormation`, used by `TrainFormationLabel`/`TrainSeriesTag`).
+  the Tz/Taufname seen per leg (`Leg.formationKey`, `rememberFormation`, used by `TrainFormationLabel`/`TrainSeriesTag`). "Wendet aus ICE 567" at a train's first stop and "Wendet zu ICE 1501" at its last (#501, `TrainTurnaroundLinks`, each train opens `TzTurnaround`'s neighbour via `TzTrainRunView`): in the train view (`TripView`) always, in a journey's `LegCard` only where the leg starts at the train's first stop or ends at its last (`TzTurnaround.startsWith`/`endsWith`, from the train's own start the server sends and the next train's start station). `View.trainTurnaround` loads it via `AppModel.turnaround` (only within 36 h of the ride, cached per train and day, a failure waits 5 min): Kit `TzLogClient.turnaround(for:on:)` asks our server's Tz log (#502), which refreshes the trainset's journeys at most every 30 min and only when asked; the view asks again every 30 min while on screen.
 - **Persistence:** `Storage.save/load(key:)` → `Application Support/BetterBahn/<key>.json` (migrates old
   UserDefaults); `AppSettings` uses UserDefaults. Saved data must stay decodable across versions (e.g.
   `DataSource.dbRest` kept only for decoding).
