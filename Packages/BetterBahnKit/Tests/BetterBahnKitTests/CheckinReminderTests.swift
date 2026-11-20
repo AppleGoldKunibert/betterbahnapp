@@ -45,4 +45,25 @@ import Testing
         let cancelled = Journey(legs: [leg("ICE 1", frankfurt, fulda, dep: time(10), arr: time(40), cancelled: true)], source: .bahnDe)
         #expect(cancelled.checkinReminders(now: now).isEmpty)
     }
+
+    @Test func notificationPointsAtTheJourneyAndLeg() throws {
+        let entry = UUID()
+        // bahn.de's trip IDs contain "|" themselves.
+        let legID = "2|#VN#1#ST#1763|8000105" + "2026-11-17 10:00:00 +0000"
+        let identifier = CheckinReminder.notificationID(entry: entry, legID: legID)
+        let target = try #require(CheckinReminder.target(ofNotificationID: identifier))
+        #expect(target.entry == entry)
+        #expect(target.legID == legID)
+        #expect(CheckinReminder.target(ofNotificationID: "exit|" + entry.uuidString + "|x") == nil)
+        #expect(CheckinReminder.target(ofNotificationID: "checkin|nojourney|x") == nil)
+        #expect(CheckinReminder.target(ofNotificationID: "checkin|" + entry.uuidString + "|") == nil)
+    }
+
+    @Test func outcomeOfTheReminderButtonSaysWhatToDo() {
+        let leg = journey.legs[0]
+        #expect(ReminderCheckinOutcome.checkedIn.title == "Eingecheckt")
+        #expect(ReminderCheckinOutcome.checkedIn.body(for: leg) == "Du bist in ICE 1000 nach Fulda eingecheckt.")
+        #expect(ReminderCheckinOutcome.trainNotFound.title == "Noch nicht eingecheckt")
+        #expect(ReminderCheckinOutcome.trainNotFound.body(for: leg) == "Träwelling kennt ICE 1000 nicht. Tippe hier, um ihn selbst einzutragen.")
+    }
 }
