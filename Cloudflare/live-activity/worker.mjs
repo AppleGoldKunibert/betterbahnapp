@@ -22,6 +22,8 @@ const ON_TIME_LOOKAHEAD = 2 * 3600;
 const SCHEDULE_AHEAD = 3 * 3600;
 /// A journey whose activity couldn't be ended is forgotten this long after its arrival anyway.
 const FORGET_AFTER = 30 * MINUTE;
+/// However late DB says the last train is, the journey is forgotten this long after its planned arrival.
+const MAX_ARRIVAL_DELAY = 6 * 3600;
 const ID_PATTERN = /^[0-9a-f]{32}$/;
 const SECRET_PATTERN = /^[0-9a-f]{64}$/;
 const PUSH_TOKEN_PATTERN = /^[0-9a-f]{32,400}$/;
@@ -80,11 +82,10 @@ export async function handleRequest(request, env = {}, now = Date.now()) {
     const seconds = Math.floor(now / 1000);
     // What the app shows right now, worked out from the same journey: only a change from it is pushed.
     const state = contentState(journey, seconds);
-    const ends = best(journey.legs[journey.legs.length - 1].arrival) + ARRIVED_DISPLAY_DURATION;
     await env.DB.prepare(
         "INSERT OR REPLACE INTO activities (id, secret_hash, push_token, sandbox, journey, state, next_check, ends, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     ).bind(id, secretHash, body.pushToken, body.sandbox ? 1 : 0, JSON.stringify(journey), state ? canonical(state) : null,
-        nextRefresh(journey, seconds), ends, seconds).run();
+        nextRefresh(journey, seconds), endsOf(journey), seconds).run();
     return json(200, {});
 }
 
@@ -172,9 +173,11 @@ export async function processDueActivities(env, now = Date.now(), deps = {}) {
 /// One look at one activity: refresh, push what changed (or end it after the arrival), plan the next look.
 async function check(activity, env, seconds, iris, apns) {
     const remove = () => env.DB.prepare("DELETE FROM activities WHERE id = ?").bind(activity.id).run();
-    if (seconds > activity.ends + FORGET_AFTER) return remove();
-
+    // The stored journey carries the latest delay of every earlier look, so a train that got later since the
+    // handover keeps being followed until its real arrival.
     const journey = JSON.parse(activity.journey);
+    if (seconds > endsOf(journey) + FORGET_AFTER) return remove();
+
     await refreshJourney(journey, seconds, iris);
     const state = contentState(journey, seconds);
     if (!state) return remove();
@@ -206,8 +209,15 @@ async function check(activity, env, seconds, iris, apns) {
         // Only what was delivered counts; otherwise it is sent again on the next look.
         if (result === "sent") stored = canonical(state);
     }
-    await env.DB.prepare("UPDATE activities SET journey = ?, state = ?, next_check = ? WHERE id = ?")
-        .bind(JSON.stringify(journey), stored, nextRefresh(journey, seconds), activity.id).run();
+    await env.DB.prepare("UPDATE activities SET journey = ?, state = ?, next_check = ?, ends = ? WHERE id = ?")
+        .bind(JSON.stringify(journey), stored, nextRefresh(journey, seconds), endsOf(journey), activity.id).run();
+}
+
+/// When the activity ends: the final arrival as last known plus the minutes "Angekommen" shows, at most
+/// `MAX_ARRIVAL_DELAY` after the planned arrival.
+export function endsOf(journey) {
+    const arrival = journey.legs[journey.legs.length - 1].arrival;
+    return Math.min(best(arrival), arrival.planned + MAX_ARRIVAL_DELAY) + ARRIVED_DISPLAY_DURATION;
 }
 
 // MARK: - Live data
