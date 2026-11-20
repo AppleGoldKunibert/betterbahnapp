@@ -3,7 +3,8 @@ import Foundation
 /// Transitous is primary. A separately configured provider can supply failover.
 /// bahn.de remains a station-search fallback and the source for coach sequences and journey details;
 /// when bahn.de has no coach sequence (yet), vagonweb.cz supplies the train type and planned Wagenreihung, with bahn.expert as the
-/// fallback for the train type; bahn.jetzt supplies live train positions.
+/// fallback for the train type; live train positions come from DB's RIS::Maps through our Worker, else bahn.jetzt
+/// (`TrainPositionClient`).
 public final class CombinedProvider: TransitProvider {
     public var source: DataSource { primary.source }
     public let primary: any TransitProvider
@@ -11,7 +12,7 @@ public final class CombinedProvider: TransitProvider {
     public let bahnDe: BahnDeClient?
     public let bahnExpert: BahnExpertClient?
     public let vagonweb: VagonwebClient?
-    public let bahnJetzt: BahnJetztClient?
+    public let trainPositions: TrainPositionClient?
     private let health: Health
     private let renumbered = RenumberedTrips()
 
@@ -20,12 +21,12 @@ public final class CombinedProvider: TransitProvider {
                 bahnDe: BahnDeClient? = BahnDeClient(),
                 bahnExpert: BahnExpertClient? = BahnExpertClient(),
                 vagonweb: VagonwebClient? = VagonwebClient(),
-                bahnJetzt: BahnJetztClient? = BahnJetztClient(),
+                trainPositions: TrainPositionClient? = TrainPositionClient(),
                 cooldown: TimeInterval = 120) {
         self.bahnDe = bahnDe
         self.bahnExpert = bahnExpert
         self.vagonweb = vagonweb
-        self.bahnJetzt = bahnJetzt
+        self.trainPositions = trainPositions
         self.primary = primary
         self.fallback = fallback
         self.health = Health(cooldown: cooldown)
