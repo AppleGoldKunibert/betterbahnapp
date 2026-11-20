@@ -97,6 +97,10 @@ test("a train's live times, platform and the transfer into the next one go into 
     assert.match(html, /<span class="ontime">22:14<\/span> <s>22:09<\/s>/);
     assert.match(html, /class="gl moved">Gl\. 9</);
     assert.match(html, /Umstieg: 6 Min\./);
+    // The ICE has live data, the RE (not in IRIS) keeps the plain times from sharing.
+    assert.equal(live.legs[0].live, true);
+    assert.equal(live.legs[1].live, undefined);
+    assert.match(html, /<span class="t big">22:20<\/span>/);
     assert.match(html, /Live-Daten der Deutschen Bahn · Stand 20:00/);
     // The shared journey itself stays as it was.
     assert.equal(view.legs[0].arrival.actual, null);
@@ -113,6 +117,9 @@ test("a train on time hours before it leaves is live too: DB knows it, it just r
     assert.equal(live.live, true);
     assert.equal(live.legs[0].arrival.actual, null);
     assert.match(renderJourney(live), /Live-Daten der Deutschen Bahn · Stand 10:00/);
+    // No delay reported while DB's data is there: the times are on time, so green.
+    assert.match(renderJourney(live), /<span class="t big ontime">19:02<\/span>/);
+    assert.equal(renderJourney(view).includes('t big ontime'), false);
 });
 
 test("trains that have arrived or won't run for a long time aren't asked, a finished journey asks nothing", async () => {

@@ -179,9 +179,10 @@ export function renderJourney(view) {
     const durationText = minutes => minutes < 60 ? `${minutes} Min.`
         : `${Math.floor(minutes / 60)} Std.${minutes % 60 ? ` ${minutes % 60} Min.` : ""}`;
 
-    const timeCell = (info, className = "") => {
+    // `live`: DB's live data exists for the train, so a time without a delay is on time (green), not just as shared.
+    const timeCell = (info, className = "", live = false) => {
         const delay = delayOf(info);
-        if (delay === null || delay === 0) return `<span class="t ${className}">${hhmm(info.planned)}</span>`;
+        if (delay === null || delay === 0) return `<span class="t ${className}${live ? " ontime" : ""}">${hhmm(info.planned)}</span>`;
         return `<span class="t ${className}"><span class="${tone(delay)}">${hhmm(info.actual)}</span> <s>${hhmm(info.planned)}</s></span>`;
     };
 
@@ -208,7 +209,7 @@ export function renderJourney(view) {
             const info = stop.arrival ?? stop.departure;
             const platformInfo = stop.arrivalPlatform ?? stop.departurePlatform;
             const through = stop.access === "passThrough";
-            return `<li class="${stop.cancelled ? "cancelled" : ""}${through ? " through" : ""}">${info ? timeCell(info) : `<span class="t"></span>`}`
+            return `<li class="${stop.cancelled ? "cancelled" : ""}${through ? " through" : ""}">${info ? timeCell(info, "", leg.live === true) : `<span class="t"></span>`}`
                 + `<span class="name">${escape(stop.name)}</span>${platformText(platformInfo)}</li>`;
         }).join("");
         const label = between.length === 1 ? "1 Halt" : `${between.length} Halte`;
@@ -230,9 +231,9 @@ export function renderJourney(view) {
 <p class="train">${badge(leg)}${direction}</p>
 ${leg.cancelled ? `<p class="pill heavy">Fällt aus</p>` : ""}
 <div class="ends">
-<div class="end">${timeCell(leg.departure, "big")}<span class="name">${escape(leg.origin)}</span>${platformText(leg.departurePlatform)}</div>
+<div class="end">${timeCell(leg.departure, "big", leg.live === true)}<span class="name">${escape(leg.origin)}</span>${platformText(leg.departurePlatform)}</div>
 ${stopsList(leg)}
-<div class="end">${timeCell(leg.arrival, "big")}<span class="name">${escape(leg.destination)}</span>${platformText(leg.arrivalPlatform)}</div>
+<div class="end">${timeCell(leg.arrival, "big", leg.live === true)}<span class="name">${escape(leg.destination)}</span>${platformText(leg.arrivalPlatform)}</div>
 </div>
 ${messages}
 </section>${transfer}`;
