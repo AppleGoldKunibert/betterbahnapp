@@ -9,6 +9,37 @@ import Testing
         #expect(JourneyShareLink.journey(from: url) == journey)
     }
 
+    /// Transitous stops have no EVA number, but the share page asks DB's IRIS for live times by it: the shared copy
+    /// gets them from the offline list, the journey itself stays as it was.
+    @Test func sharedCopyHasTheEVANumbersTheLiveTimesNeed() throws {
+        var journey = Self.journey()
+        let berlin = station("de-DELFI_de:11000:900003201", "S+U Berlin Hauptbahnhof", 52.5251, 13.3694, source: .transitous)
+        let dresden = station("de-DELFI_de:14612:16", "Dresden Bahnhof Neustadt", 51.0661, 13.7402, source: .transitous)
+        let nowhere = station("nowhere", "Testhausen Ost", source: .transitous)
+        let hamburg = station("8002549", "Hamburg Hbf")
+        let time = TimeInfo(planned: journey.legs[0].departure.planned, actual: nil)
+        func stop(_ station: Station) -> Stopover {
+            Stopover(station: station, arrival: time, departure: time, arrivalPlatform: nil, departurePlatform: nil, cancelled: false)
+        }
+        journey.legs[0].origin = berlin
+        journey.legs[0].destination = dresden
+        journey.legs[0].stopovers = [stop(berlin), stop(nowhere), stop(hamburg), stop(dresden)]
+        #expect(journey.legs[0].origin.evaNumber == nil)
+
+        let shared = try #require(JourneyShareLink.payload(for: journey).flatMap(JourneyShareLink.journey(fromPayload:)))
+        let leg = shared.legs[0]
+        // Berlin Hbf has several levels: the main station's number; a station not on the list stays without one.
+        #expect(leg.origin.evaNumber == "8011160")
+        #expect(leg.destination.evaNumber == "8010089")
+        #expect(leg.stopovers.map(\.station.evaNumber) == ["8011160", nil, "8002549", "8010089"])
+        // Names, IDs and everything else are untouched.
+        #expect(leg.origin.id == berlin.id)
+        #expect(leg.origin.name == berlin.name)
+        #expect(leg.stopovers.map(\.station.id) == journey.legs[0].stopovers.map(\.station.id))
+        // The journey itself is unchanged.
+        #expect(journey.legs[0].origin.evaNumber == nil)
+    }
+
     static func journey() -> Journey {
         let departure = Date(timeIntervalSince1970: 1_790_000_000)
         let leg = Leg(origin: station("8002549", "Hamburg Hbf"), destination: station("8010085", "Dresden Hbf"),
