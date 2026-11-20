@@ -133,6 +133,7 @@ function merge(leg, stops, { stops: live, messages }) {
     }
     return {
         ...leg,
+        live: true,
         departure: withActual(leg.departure, first.depRt),
         arrival: withActual(leg.arrival, end.arrRt),
         departurePlatform: withPlatform(leg.departurePlatform, first.platform, first.platformRt),
