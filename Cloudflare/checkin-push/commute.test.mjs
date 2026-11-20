@@ -255,3 +255,22 @@ test("forgets journeys that have arrived", async () => {
     await processDueCommutes(env, at("0850"), { fetch });
     assert.equal(env.DB.rows().length, 0);
 });
+
+test("an APNs send that throws doesn't repeat what was already sent", async () => {
+    const env = await environment();
+    const iris = (path) => path === "fchg/8010093"
+        ? plan(`<s id="e-1" eva="8010093"><dp ct="2610190750" cp="4" l="3"/></s>`)
+        : baseIris[path];
+    const { fetch: working, pushes } = upstream(iris);
+    let sends = 0;
+    // The second push of the first look can't reach APNs.
+    const fetch = async (url, init) => {
+        if (url.includes("push.apple.com") && ++sends === 2) throw new TypeError("Network connection lost");
+        return working(url, init);
+    };
+    await put(env, { journeys: [journey] }, fetch);
+    await processDueCommutes(env, now, { fetch });
+    assert.deepEqual(pushes.map(push => push.collapse), ["commute-J1-delay-0"]);
+    await processDueCommutes(env, now + 60000, { fetch });
+    assert.deepEqual(pushes.map(push => push.collapse), ["commute-J1-delay-0", "commute-J1-departure-platform-0"]);
+});
