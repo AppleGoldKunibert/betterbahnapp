@@ -1035,6 +1035,31 @@ final class AppModel {
         if changed { savedJourneys = updated }
     }
 
+    /// What the server's Tz log said about a train's neighbours and when it was asked; per train and day.
+    @ObservationIgnored private var turnaroundCache: [String: (asked: Date, value: TzTurnaround?)] = [:]
+    /// When asking for a train last failed; it isn't asked again for 5 minutes, however often the view reappears.
+    @ObservationIgnored private var turnaroundFailures: [String: Date] = [:]
+
+    /// The trains a train's trainset ran as before and runs as after it, from our server's Tz log (#501, #502). Asked
+    /// at most every 30 minutes per train and day, which is also how often the server looks at its source, and only
+    /// within a day and a half of the ride (the log knows no more); an empty answer counts as answered too.
+    func turnaround(for line: Line?, on date: Date) async -> TzTurnaround? {
+        guard abs(date.timeIntervalSinceNow) < 36 * 3600, let ref = BahnDeClient.trainReference(for: line) else { return nil }
+        let key = "\(ref.category) \(ref.number)|\(BahnDeClient.berlinDay(date))"
+        if let cached = turnaroundCache[key], cached.asked.timeIntervalSinceNow > -30 * 60 { return cached.value }
+        if let failed = turnaroundFailures[key], failed.timeIntervalSinceNow > -5 * 60 { return turnaroundCache[key]?.value }
+        let found = try? await TzLogClient().turnaround(for: line, on: date)
+        let value = found.flatMap { $0.isEmpty ? nil : $0 }
+        // An answer, even an empty one, waits out the half hour; a failed request is asked again after 5 minutes.
+        if found != nil {
+            turnaroundCache[key] = (.now, value)
+            turnaroundFailures[key] = nil
+        } else {
+            turnaroundFailures[key] = .now
+        }
+        return value ?? turnaroundCache[key]?.value
+    }
+
     @ObservationIgnored private var trainTypeCache: [String: TrainTypeLookup?] = [:]
 
     /// A train's type ("ICE 4", "ICE 3neo" …) from its planned formation: vagonweb.cz's scheduled
