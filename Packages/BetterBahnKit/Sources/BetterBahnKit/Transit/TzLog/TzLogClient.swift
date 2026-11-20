@@ -91,11 +91,43 @@ public struct TzTurnaround: Codable, Sendable, Hashable {
 
     /// The Tz that ran the train, nil when the log doesn't know it (yet).
     public var tz: String?
+    /// The train's own first departure (UTC) and its station, when the log knows them (older servers send neither).
+    public var start: Date?
+    public var startEva: String?
     public var previous: [Train]
     public var next: [Train]
 
+    public init(tz: String?, start: Date? = nil, startEva: String? = nil, previous: [Train], next: [Train]) {
+        self.tz = tz
+        self.start = start
+        self.startEva = startEva
+        self.previous = previous
+        self.next = next
+    }
+
     public static let none = TzTurnaround(tz: nil, previous: [], next: [])
     public var isEmpty: Bool { previous.isEmpty && next.isEmpty }
+
+    /// Whether `leg` boards where the train starts, so "Wendet aus" belongs at its first stop: it leaves at the
+    /// train's own start time, or from its first station.
+    public func startsWith(_ leg: Leg) -> Bool {
+        guard !previous.isEmpty else { return false }
+        if let start, abs(start.timeIntervalSince(leg.departure.planned)) < 60 { return true }
+        guard let startEva, let origin = leg.origin.runEVA else { return false }
+        return TrainStatistics.mainStationEVA(startEva) == TrainStatistics.mainStationEVA(origin)
+    }
+
+    /// Whether `leg` gets off where the train ends, so "Wendet zu" belongs at its last stop: the next train starts
+    /// there, or the train's direction is that station.
+    public func endsWith(_ leg: Leg) -> Bool {
+        guard !next.isEmpty else { return false }
+        if let destination = leg.destination.runEVA,
+           next.contains(where: { $0.startEva.map(TrainStatistics.mainStationEVA) == TrainStatistics.mainStationEVA(destination) }) {
+            return true
+        }
+        guard let direction = leg.direction.map(Station.normalize), !direction.isEmpty else { return false }
+        return [leg.destination.name, leg.destination.displayName].map(Station.normalize).contains(direction)
+    }
 }
 
 /// Our server's Tz log: every ICE/IC trainset in Germany, Switzerland, the Netherlands and Austria with
@@ -136,6 +168,13 @@ public struct TzLogClient: Sendable {
             .init(name: "category", value: category), .init(name: "number", value: String(number)),
             .init(name: "day", value: day),
         ]), as: TzTurnaround.self, auth: auth)
+    }
+
+    /// The same for a leg's or trip's line on the day it departs (Berlin time); nothing for a train that isn't a DB
+    /// ICE/IC/EC (those aren't in the log).
+    public func turnaround(for line: Line?, on date: Date) async throws -> TzTurnaround {
+        guard let ref = BahnDeClient.trainReference(for: line), let number = Int(ref.number) else { return .none }
+        return try await turnaround(category: ref.category, number: number, day: BahnDeClient.berlinDay(date))
     }
 
     func url(_ path: String, query: [URLQueryItem] = []) throws -> URL {
