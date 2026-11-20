@@ -363,6 +363,14 @@ private struct CollectionItemSheet: View {
                     }
                     .accessibilityElement(children: .combine)
                 }
+                if item.unitNumber != nil {
+                    // A Tz or livery: its trips on top, yours and every train it ran as (#502).
+                    Section {
+                        TzRunsLink(item: item, startsWithAll: !item.isCollected) {
+                            Label("Fahrten", systemImage: "train.side.front.car")
+                        }
+                    }
+                }
                 if let first = item.firstSighting {
                     Section("Zuerst gesammelt") { SightingRow(sighting: first) }
                     if item.sightings.count > 1 {
@@ -483,43 +491,79 @@ private struct TrainsetGroupLabel: View {
     }
 }
 
-/// One row per Tz: a collected one expands to its rides, one not collected yet is greyed out.
+/// One row per Tz: one with a number opens its page (`TzRunsView`), collected or not; a collected one without a
+/// number expands to its rides; one not collected yet is greyed out.
 /// The rides are plain rows under the Tz: a third level of `DisclosureGroup` made the whole list jump down
-/// when one opened (#539).
+/// when one opened (#539). Every row has its own ID (Tz, ride, "Alle Einsätze"): rides counted per Tz from 0 gave
+/// two open Tz the same IDs, and opening one in the middle made the list jump.
 private struct TrainsetRows: View {
     let items: [TravelCollection.Item]
     let newIDs: Set<String>
     @State private var expanded: Set<String> = []
 
-    var body: some View {
-        ForEach(items) { item in
-            if item.isCollected {
-                let isExpanded = expanded.contains(item.id)
-                Button {
-                    withAnimation(.snappy) {
-                        if isExpanded { expanded.remove(item.id) } else { expanded.insert(item.id) }
-                    }
-                } label: {
-                    HStack(spacing: 8) {
-                        TrainsetLabel(item: item, isNew: newIDs.contains(item.id))
-                        Image(systemName: "chevron.right")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(.tertiary)
-                            .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                    }
-                    .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-                .accessibilityHint(isExpanded ? Text("Fahrten ausblenden") : Text("Fahrten anzeigen"))
-                if isExpanded {
-                    ForEach(Array(item.sightings.enumerated()), id: \.offset) { _, sighting in
-                        CollectionRideLink(sighting: sighting)
-                            .padding(.leading, 28)
-                    }
-                }
-            } else {
-                TrainsetLabel(item: item, isNew: false)
+    private enum Row: Identifiable {
+        case trainset(TravelCollection.Item)
+        case ride(TravelCollection.Item, Int)
+        case allRuns(TravelCollection.Item)
+
+        var id: String {
+            switch self {
+            case .trainset(let item): item.id
+            case .ride(let item, let index): "\(item.id)#ride\(index)"
+            case .allRuns(let item): "\(item.id)#all"
             }
+        }
+    }
+
+    private var rows: [Row] {
+        items.flatMap { item -> [Row] in
+            guard item.isCollected, item.unitNumber == nil, expanded.contains(item.id) else { return [.trainset(item)] }
+            return [.trainset(item)] + item.sightings.indices.map { .ride(item, $0) } + [.allRuns(item)]
+        }
+    }
+
+    var body: some View {
+        ForEach(rows) { row in
+            switch row {
+            case .trainset(let item): trainsetRow(item)
+            case .ride(let item, let index):
+                CollectionRideLink(sighting: item.sightings[index])
+                    .padding(.leading, 28)
+            case .allRuns(let item):
+                TzRunsLink(item: item, startsWithAll: true)
+                    .font(.subheadline)
+                    .padding(.leading, 28)
+            }
+        }
+    }
+
+    @ViewBuilder private func trainsetRow(_ item: TravelCollection.Item) -> some View {
+        if item.unitNumber != nil {
+            // Collected or not, a Tz opens its own page: your rides ("Meine") and where it runs (#502). With many
+            // rides that reads better than a long list opened under it.
+            TzRunsLink(item: item, startsWithAll: !item.isCollected) {
+                TrainsetLabel(item: item, isNew: newIDs.contains(item.id))
+            }
+        } else if item.isCollected {
+            let isExpanded = expanded.contains(item.id)
+            Button {
+                withAnimation(.snappy) {
+                    if isExpanded { expanded.remove(item.id) } else { expanded.insert(item.id) }
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    TrainsetLabel(item: item, isNew: newIDs.contains(item.id))
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                }
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint(isExpanded ? Text("Fahrten ausblenden") : Text("Fahrten anzeigen"))
+        } else {
+            TrainsetLabel(item: item, isNew: false)
         }
     }
 }
@@ -553,7 +597,7 @@ private struct TrainsetLabel: View {
 }
 
 /// A ride of a collected item; opens its journey.
-private struct CollectionRideLink: View {
+struct CollectionRideLink: View {
     let sighting: TravelCollection.Sighting
     @Environment(AppModel.self) private var model
 
@@ -568,7 +612,7 @@ private struct CollectionRideLink: View {
     }
 }
 
-private struct SightingRow: View {
+struct SightingRow: View {
     let sighting: TravelCollection.Sighting
 
     var body: some View {

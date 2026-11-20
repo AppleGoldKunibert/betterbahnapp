@@ -29,6 +29,8 @@ struct CoachSequenceDisclosure: View {
     var seatLeg: Leg?
     /// The train's stops and route, to draw the Wagenreihung as seen from the platform (#474).
     var run: ExitSides.Run?
+    /// The ride whose free seats the seat map shows; none for a train from a departure board.
+    var seatsLeg: Leg?
 
     init(leg: Leg, reservation: SeatReservation? = nil, savesSeat: Bool = false, coachAdvice: CoachAdvice? = nil,
          notesCoachAdvice: Bool = true, spacing: CGFloat = 0) {
@@ -37,6 +39,7 @@ struct CoachSequenceDisclosure: View {
         self.coachAdvice = coachAdvice
         self.notesCoachAdvice = notesCoachAdvice
         seatLeg = savesSeat ? leg : nil
+        seatsLeg = leg
         run = ExitSides.Run(leg: leg)
         // The stop just left until its Wagenreihung would close, then the next one; to a terminus the last one.
         let requests = BahnDeClient.formationRequests(for: leg)
@@ -97,7 +100,7 @@ struct CoachSequenceDisclosure: View {
                         }
                         if open {
                             CoachSequencePanel(request: shown, sequence: sequence, reservation: reservation, coachAdvice: coachAdvice,
-                                               notesCoachAdvice: notesCoachAdvice, run: run)
+                                               notesCoachAdvice: notesCoachAdvice, run: run, seatsLeg: seatsLeg)
                                 .transition(.fold)
                         }
                     }
@@ -211,15 +214,18 @@ struct CoachSequencePanel: View {
     let notesCoachAdvice: Bool
     /// The train's stops and route: which side of it the platform is on, to draw it as seen from there.
     let run: ExitSides.Run?
+    /// The ride whose free seats the seat map shows.
+    let seatsLeg: Leg?
 
     /// - Parameter sequence: already loaded by the caller; fetched here otherwise (e.g. from a stop's platform).
     init(request: BahnDeClient.FormationRequest, sequence: CoachSequence? = nil, reservation: SeatReservation? = nil,
-         coachAdvice: CoachAdvice? = nil, notesCoachAdvice: Bool = true, run: ExitSides.Run? = nil) {
+         coachAdvice: CoachAdvice? = nil, notesCoachAdvice: Bool = true, run: ExitSides.Run? = nil, seatsLeg: Leg? = nil) {
         self.request = request
         self.reservation = reservation
         self.coachAdvice = coachAdvice
         self.notesCoachAdvice = notesCoachAdvice
         self.run = run
+        self.seatsLeg = seatsLeg
         _sequence = State(initialValue: sequence)
     }
 
@@ -249,7 +255,8 @@ struct CoachSequencePanel: View {
                     }
                     let suggested = coachAdvice.map(sequence.coachIDs(for:)) ?? []
                     let seen = sequence.asSeenFromPlatform(side: platformSide)
-                    CoachSequenceDiagram(sequence: seen, reservation: reservation, highlightedCoachID: reservation.flatMap { reservation in
+                    CoachSequenceDiagram(sequence: seen, reservation: reservation, seatsLeg: sequence.source == .bahnDe ? seatsLeg : nil,
+                                         highlightedCoachID: reservation.flatMap { reservation in
                         switch sequence.position(ofCoach: reservation.coach, train: reservation.trainName) {
                         case .sectors(_, let id), .noSectors(let id): id
                         case .coachMissing: nil
@@ -487,6 +494,8 @@ private struct CoachSequenceDiagram: View {
     let sequence: CoachSequence
     /// Highlighted in the seat map.
     var reservation: SeatReservation?
+    /// The ride whose free seats the seat map shows.
+    var seatsLeg: Leg?
     /// The coach of the reserved seat, marked with a frame.
     var highlightedCoachID: Int?
     /// Coaches to board for a quick transfer or exit (#383), marked with a dashed frame.
@@ -640,7 +649,7 @@ private struct CoachSequenceDiagram: View {
         .padding(.vertical, 12)
         .insetPanel()
         .sheet(item: $seatMapCoach) { coach in
-            SeatMapSheet(sequence: sequence, coaches: placed.map(\.coach), selected: coach, reservation: reservation)
+            SeatMapSheet(sequence: sequence, coaches: placed.map(\.coach), selected: coach, reservation: reservation, leg: seatsLeg)
         }
     }
 

@@ -4,16 +4,23 @@ import SwiftUI
 /// The train from above with every seat (#365), opened by tapping a coach in the Wagenreihung: the
 /// coaches DB has seat maps for, left to right as on the platform, scrolled to the tapped one (or the
 /// reserved seat in it). Coaches standing the other way round are turned, their seat numbers stay
-/// upright. Drawings: DB's Wagenreihungspläne, © Deutsche Bahn AG.
+/// upright. With the ride (`leg`), the seats still free on it in the settings' class are green, with a
+/// count per coach (bahn.de's seat picker). Drawings: DB's Wagenreihungspläne, © Deutsche Bahn AG.
 struct SeatMapSheet: View {
     let sequence: CoachSequence
     /// The coaches from left to right, as the platform diagram shows them.
     let coaches: [CoachSequence.Coach]
     let selected: CoachSequence.Coach
     var reservation: SeatReservation?
+    /// The ride whose free seats are shown.
+    var leg: Leg?
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.appDesign) private var design
+    @Environment(AppModel.self) private var model
+    @State private var availability: SeatAvailability?
+    /// The class `availability` is for.
+    @State private var travelClass: TravelClass = .second
 
     /// Fahrkarte: the seat and the coaches' names in the rounded type (#504).
     private var rounded: Font.Design? { design == .fahrkarte ? .rounded : nil }
@@ -40,6 +47,17 @@ struct SeatMapSheet: View {
         return Set(reservation.seats)
     }
 
+    /// Whether the coach has seats of the class the free seats are for; the other class's never are.
+    private func servesClass(_ coach: CoachSequence.Coach) -> Bool {
+        travelClass == .first ? coach.firstClass : coach.secondClass
+    }
+
+    /// The free seats in `coach`, nil when bahn.de said nothing about it (another class, a coupled train).
+    private func freeSeats(in coach: CoachSequence.Coach) -> Set<String>? {
+        guard let availability, servesClass(coach), availability.knows(coach: coach.number) else { return nil }
+        return availability.freeSeats(in: coach.number)
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView(.vertical) {
@@ -49,6 +67,10 @@ struct SeatMapSheet: View {
                             .font(.subheadline.weight(.semibold))
                             .fontDesign(rounded)
                             .foregroundStyle(Color.brandText)
+                            .padding(.horizontal, 16)
+                    }
+                    if let availability {
+                        freeSeatsNote(availability)
                             .padding(.horizontal, 16)
                     }
                     ScrollViewReader { proxy in
@@ -92,6 +114,22 @@ struct SeatMapSheet: View {
             }
         }
         .presentationDetents([.medium, .large])
+        .task {
+            guard let leg else { return }
+            travelClass = model.settings.travelClass
+            availability = await model.seatAvailability(for: leg)
+        }
+    }
+
+    /// What the green seats mean, or that nothing is left.
+    private func freeSeatsNote(_ availability: SeatAvailability) -> some View {
+        let full = availability.bookedOut || availability.freeCount == 0
+        return Label(full ? String(localized: "In der \(travelClass.displayName) ist auf deiner Strecke kein Platz mehr frei.")
+                          : String(localized: "Grüne Plätze sind auf deiner Strecke in der \(travelClass.displayName) noch frei."),
+                     systemImage: full ? "person.2.slash" : "checkmark.seal")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     /// To the reserved seat in the tapped coach, else to the coach's start.
@@ -105,14 +143,16 @@ struct SeatMapSheet: View {
 
     private func coachColumn(_ item: Item) -> some View {
         let reserved = reservedSeats(in: item.coach)
-        let title = [item.coach.number.map { String(localized: "Wagen \($0)") }, item.coach.hasKindOrClass ? item.coach.title : nil]
+        let free = freeSeats(in: item.coach)
+        let title = [item.coach.number.map { String(localized: "Wagen \($0)") }, item.coach.hasKindOrClass ? item.coach.title : nil,
+                     free.map { String(localized: "\($0.count) frei") }]
             .compactMap(\.self).joined(separator: " · ")
         return VStack(alignment: .leading, spacing: 6) {
             Text(title)
                 .font(.subheadline.weight(.semibold))
                 .fontDesign(rounded)
                 .foregroundStyle(item.id == selected.id ? Color.brandText : .primary)
-            SeatMapCoach(map: item.map, turned: item.turned, reserved: reserved, height: Self.coachHeight, coachID: item.id)
+            SeatMapCoach(map: item.map, turned: item.turned, reserved: reserved, free: free ?? [], height: Self.coachHeight, coachID: item.id)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(title)
@@ -120,11 +160,12 @@ struct SeatMapSheet: View {
     }
 }
 
-/// One coach's drawing with its seat numbers drawn on top, reserved seats highlighted.
+/// One coach's drawing with its seat numbers drawn on top, reserved seats highlighted, free ones green.
 private struct SeatMapCoach: View {
     let map: SeatMap
     let turned: Bool
     let reserved: Set<String>
+    let free: Set<String>
     let height: CGFloat
     let coachID: Int
 
@@ -157,19 +198,23 @@ private struct SeatMapCoach: View {
                     let x = turned ? 1 - seat.x - seat.width : seat.x
                     let y = turned ? 1 - seat.y - seat.height : seat.y
                     let isReserved = reserved.contains(seat.number)
+                    let isFree = !isReserved && free.contains(seat.number)
                     let size = seat.height * height
                     Text(seat.number)
                         .font(.system(size: size * 0.8, weight: .bold))
                         // On the accent-filled box of the reserved seat: black where white wouldn't read.
                         .foregroundStyle(isReserved ? Color.onBrandText : Color.white)
                         .fixedSize()
-                        .padding(isReserved ? size * 0.35 : 0)
+                        .padding(isReserved ? size * 0.35 : isFree ? size * 0.12 : 0)
                         .background {
                             if isReserved {
                                 RoundedRectangle(cornerRadius: size * 0.3, style: .continuous)
                                     .fill(Color.brandText)
                                     .stroke(.white, lineWidth: 1.5)
                                     .shadow(radius: 2)
+                            } else if isFree {
+                                RoundedRectangle(cornerRadius: size * 0.25, style: .continuous)
+                                    .fill(Color.punctual)
                             }
                         }
                         .position(x: (x + seat.width / 2) * width, y: (y + seat.height / 2) * height)
