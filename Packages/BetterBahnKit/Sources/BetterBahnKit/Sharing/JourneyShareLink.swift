@@ -20,7 +20,7 @@ public enum JourneyShareLink {
 
     /// The journey as zlib-compressed JSON in base64url: the long link's `data`, and what the Worker stores.
     public static func payload(for journey: Journey) -> String? {
-        guard let json = try? JSONEncoder().encode(journey.addingEvaNumbers()),
+        guard let json = try? JSONEncoder().encode(journey.forSharing()),
               let compressed = try? (json as NSData).compressed(using: .zlib) as Data? else { return nil }
         return base64URLEncode(compressed)
     }
@@ -109,22 +109,30 @@ public enum JourneyShareLink {
 }
 
 extension Journey {
-    /// The journey with the EVA number of every station that has none, from the offline list (`StationNames`, for
-    /// a station with several levels the main one): Transitous stops carry none, and the share page's Worker asks
-    /// DB's IRIS for live times by EVA number. Only for the shared copy, the saved journey stays as it is.
-    func addingEvaNumbers() -> Journey {
-        func filled(_ station: Station) -> Station {
-            guard station.evaNumber == nil, let eva = ArrivalShare.evaNumber(of: station) else { return station }
+    /// The copy that gets shared. Every station without an EVA number gets one from the offline list
+    /// (`StationNames`, for a station with several levels the main one): Transitous stops carry none, and the share
+    /// page's Worker asks DB's IRIS for live times by it. Stations and directions are named the way the app shows
+    /// them (`Station.displayName`, DB's names), not the feed's ("Berlin Hbf", not "S+U Berlin Hauptbahnhof").
+    /// Only for the shared copy, the saved journey stays as it is.
+    func forSharing() -> Journey {
+        func prepared(_ station: Station, withEva: Bool) -> Station {
             var station = station
-            station.evaNumber = eva
+            if withEva, station.evaNumber == nil, let eva = ArrivalShare.evaNumber(of: station) {
+                station.evaNumber = eva
+            }
+            station.name = station.displayName
             return station
         }
         var journey = self
-        for index in journey.legs.indices where !journey.legs[index].isWalking {
-            journey.legs[index].origin = filled(journey.legs[index].origin)
-            journey.legs[index].destination = filled(journey.legs[index].destination)
+        for index in journey.legs.indices {
+            let walking = journey.legs[index].isWalking
+            journey.legs[index].origin = prepared(journey.legs[index].origin, withEva: !walking)
+            journey.legs[index].destination = prepared(journey.legs[index].destination, withEva: !walking)
             for stop in journey.legs[index].stopovers.indices {
-                journey.legs[index].stopovers[stop].station = filled(journey.legs[index].stopovers[stop].station)
+                journey.legs[index].stopovers[stop].station = prepared(journey.legs[index].stopovers[stop].station, withEva: !walking)
+            }
+            if let direction = journey.legs[index].direction {
+                journey.legs[index].direction = StationNames.displayName(forName: direction)
             }
         }
         return journey
