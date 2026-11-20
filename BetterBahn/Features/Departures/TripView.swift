@@ -495,7 +495,9 @@ struct TripContent: View {
             TrainOperatorsLabel(source: .trip(trip)).font(.caption).foregroundStyle(.tertiary)
         }
         TrainFormationLabel(trip: trip, savedLeg: savedLeg)
-        TrainTurnaroundLabel(line: trip.line, date: trip.stopovers.first?.departure?.planned ?? .now)
+        // Without a planned departure the day's start, which doesn't change every minute like `.now`.
+        TrainTurnaroundLabel(line: trip.line, date: trip.stopovers.first?.departure?.planned
+                                 ?? Calendar.current.startOfDay(for: .now))
     }
 
     private var headerButtons: some View {
