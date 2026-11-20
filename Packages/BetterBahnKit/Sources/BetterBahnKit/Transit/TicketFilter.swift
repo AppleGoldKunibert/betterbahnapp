@@ -68,15 +68,15 @@ public enum TicketFilter: Sendable, Hashable {
     }
 
     /// Per leg, whether the train itself is valid (ignoring where the ride goes). With the BahnCard 100
-    /// the operator list stops applying from the first station abroad on, so a foreign operator's
-    /// train there counts.
+    /// the operator list doesn't apply to a leg that starts abroad, so a foreign operator's train there
+    /// counts. Decided per leg: once the journey is back in Germany, the list applies again.
     private func trainsValid(_ legs: [Leg]) -> [Bool] {
-        var abroad = false
-        return legs.map { leg in
-            if !abroad, CrossBorder.isAbroad(leg.origin, covered: []) { abroad = true }
+        legs.map { leg in
             switch self {
-            case .bahnCard100(let rules): return rules.isValid(leg.line, abroad: abroad)
-            case .deutschlandticket: return isValid(leg.line)
+            case .bahnCard100(let rules):
+                rules.isValid(leg.line, abroad: CrossBorder.isAbroad(leg.origin, covered: []))
+            case .deutschlandticket:
+                isValid(leg.line)
             }
         }
     }
