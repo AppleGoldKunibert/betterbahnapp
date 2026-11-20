@@ -64,6 +64,12 @@ enum Methods {
         "widgetState": handler(widgetState),
         "boardWidgetRows": handler(boardWidgetRows),
         "plannedCoachSequence": handler(plannedCoachSequence),
+        "liveStatus": handler(liveStatus),
+        "trainSeries": handler(trainSeries),
+        "refineJourneys": handler(refineJourneys),
+        "checkLive": handler(checkLive),
+        "trainCandidates": handler(trainCandidates),
+        "planTrainRoute": handler(planTrainRoute),
         "setWorkerToken": handler(setWorkerToken),
         "hasWorkerToken": handler(hasWorkerToken),
     ]
@@ -144,7 +150,10 @@ enum Methods {
         let before = page.journeys.count
         page.journeys = page.journeys.filter { filter.isValid($0.journey) || filter.crossesBorder($0.journey) }
         page.hiddenCount = before - page.journeys.count
-        for index in page.journeys.indices { page.journeys[index].validWithTicket = filter.isValid(page.journeys[index].journey) }
+        for index in page.journeys.indices {
+            page.journeys[index].validWithTicket = filter.isValid(page.journeys[index].journey)
+            page.journeys[index].entirelyAbroad = filter.isEntirelyAbroad(page.journeys[index].journey)
+        }
         return page
     }
 

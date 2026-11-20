@@ -42,6 +42,8 @@ struct JourneyDisplay: Encodable {
     var issues: [IssueDisplay]
     /// With a ticket filter: whether the ticket covers it.
     var validWithTicket: Bool?
+    /// With a ticket filter: every leg runs abroad, so the ticket covers none of it (the warning when nothing fits).
+    var entirelyAbroad: Bool?
 
     init(_ journey: Journey) {
         id = journey.id
