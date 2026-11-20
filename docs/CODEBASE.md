@@ -14,7 +14,7 @@ only the files you change. Keep it current when structure changes. Build, test a
 | `Packages/BetterBahnKit/` | Models, networking, logic (iOS 26 + macOS 26, all `Sendable`) and tests. |
 | `Config/` | xcconfigs, Info.plists, entitlements. `Signing.xcconfig` holds the team ID; gitignored `Local.xcconfig` overrides it. |
 | `Cloudflare/` | Worker `betterbahn` (`wrangler.toml`): Träwelling OAuth bounce to `betterbahn://oauth`, privacy policy `/datenschutz`, support page `/support`, short links (`/share`, `/s/<id>`, `apple-app-site-association`, KV 30 days, App Attest + rate limit); without the app `/s/<id>` shows the whole journey as a web page (`journeypage.mjs` decodes the stored payload, `node --test Cloudflare/journeypage.test.mjs`) that refreshes every minute while open: `/share/<id>/live` puts DB's live times into each train not yet arrived (`journeylive.mjs` on top of `arrival.mjs`' `liveTrain`: IRIS, else bahn.de; answer cached 55 s per link, nothing runs without a reader; `node --test Cloudflare/journeylive.test.mjs`). "Ankunft teilen" (#317, `arrival.mjs`): with the last train attached, `/s/<id>` is a pickup page (arrival, delay, platform, stops), live from IRIS per stop, else bahn.de's `fahrt` via `Server/bahnde-proxy` (refusals logged as `arrival upstream`), refreshing via `/share/<id>/live`; such links expire 2 h after the arrival. |
-| `Cloudflare/bahnde-proxy/` | Worker `betterbahn2`: DB Timetables (`/timetables/v1/…`, API key as secret), DB FaSta's lifts out of order (`/fasta/v2/facilities`, always the whole list, 5 min, #486) and App Attest tokens (`/auth/…`). No bahn.de paths: bahn.de refuses Workers since October 2026. `TimetablesClient.baseURL`, `WorkerAuth.baseURL`; `BahnDeClient.baseURL` is only the template `BahnDeProxy` rewrites to the server. |
+| `Cloudflare/bahnde-proxy/` | Worker `betterbahn2`: DB OpenBoards (`GET /openboards/v1/{departures|arrivals}?evas=&from=&to=`, the Worker builds DB's POST; API key as secret; the old `/timetables/v1/…` stays for app builds that still ask it), DB FaSta's lifts out of order (`/fasta/v2/facilities`, always the whole list, 5 min, #486) and App Attest tokens (`/auth/…`). No bahn.de paths: bahn.de refuses Workers since October 2026. `OpenBoardsClient.baseURL`, `WorkerAuth.baseURL`; `BahnDeClient.baseURL` is only the template `BahnDeProxy` rewrites to the server. |
 | `Server/bahnde-proxy/` | Docker server (Python, curl_cffi) asking bahn.de with a browser's TLS fingerprint, which Akamai demands and Workers can't make (#342): bahn.de's `/web/api/…` paths with the Worker's App Attest tokens, cache, rate limit, requests to bahn.de spaced `MIN_INTERVAL` apart, pause after a block (a new session; requests running on the old one finish there, #411). The app's only way to bahn.de (`BahnDeProxy.baseURL`; game-server host behind Tailscale Funnel, `panel_boot.py`; bahn.de refuses Oracle Cloud). Also the seat picker's `gsd/gsd_v3` (seats that can be reserved per train and class, `data` = JSON with stops, planned times, train number, class and a `correlationID` of any value, no `zugfahrtKey`; answer as HTML with the JSON in `ssr_data`, `status` 0 not bookable, 1 free, 2 suggested; 409 `WEB_RES_KEIN_PLATZ_VERFUEGBAR` when booked out) and `gsd/api/wagentypen/<type>` (a coach's seat plan, unused by the app, which has DB's drawings offline). The seat map shows `gsd_v3`'s free seats (`SeatAvailability`). `python3 -m unittest Server/bahnde-proxy/proxy_test.py`. |
 | `Cloudflare/pass-signer/` | Worker `betterbahn-pass`: signs Wallet passes for DB tickets (Pass Type ID certificate as secrets). Needs App Attest, only UIC `#UT` barcodes whose issuer signature verifies (`uicsignature.mjs`). `npm install && npm test`. |
 | `Cloudflare/stats/` | Worker `betterbahn-stats` (D1) answering `POST /train-stats` (#316): per train number and stop the delays, cancellations and platform moves of 30 days, one row per train and day (`schema.sql`, `train_days`). `long_distance_days` keeps the ICE/IC/EC … runs for ~400 days, so a request with a `day` gets that day's run with its stops' real delays (`run`). Filled daily by `importer.py` from piebro/deutsche-bahn-data (CC BY 4.0; Action `train-stats-import.yml`), so nothing asks bahn.de and the app reports nothing (#336). `node --test Cloudflare/stats/worker.test.mjs`, `python3 -m unittest Cloudflare/stats/importer_test.py`. |
@@ -64,7 +64,7 @@ in `project.pbxproj`: new files join their target automatically.
   Live Activity settings are hidden off the iPhone (`LiveActivityManager.isSupported`).
 - `App/AppModel.swift` – the single `@Observable` app state (`.environment(model)`). Owns `CombinedProvider`,
   `TraewellingClient`, `TrainPicker`, `JourneyReplanner`, `DBShareImporter`, `TrainRoutePlanner`, `TicketFilter`,
-  `TimetablesClient`, `JourneyRefresher`; persisted lists (favorites, recents, `savedJourneys`, `traewellingTrips`,
+  `OpenBoardsClient`, `JourneyRefresher`; persisted lists (favorites, recents, `savedJourneys`, `traewellingTrips`,
   tracked manual check-ins); refresh loops: journeys every 300 s, the Live Activity's journey per
   `LiveActivityRefreshSchedule` (2 min, 1 min around arrivals and while transferring), train positions only while
   a map shows (Kit `TrainPositionRefresh`: 15 s, 60 s on mobile data/Low Data Mode, "Aus" loads once); delay
@@ -354,7 +354,7 @@ in `project.pbxproj`: new files join their target automatically.
   stay the feed's. Headsigns: `MPlace.displayName(ofHeadsign:)`, else `StationNames.displayName(forName:)`.
   `Station.displayName(for:)` shortens "hlavní nádraží"/"hlavná stanica". `StationNames.preload()` at launch.
   `StationNames.evaNumber(for:)` (stations with a single EVA only) is used by `BahnDeClient.evaNumber(for:)` before
-  bahn.de's search, so statistics, Timetables and Wagenreihung don't ask bahn.de per stop. Timetables also takes
+  bahn.de's search, so statistics, OpenBoards and Wagenreihung don't ask bahn.de per stop. OpenBoards also takes
   `mainEvaNumber(for:)` of a station with several levels (Leipzig Hbf, Berlin Südkreuz, #411).
 - `OperatorBrand` (#166) – feed agency → EVU logo (`Assets.xcassets/Operators/Operator-<brand>`, `OperatorLabel`,
   light plate in dark mode if `needsPlateInDarkMode`; named DB S-Bahns show the "S", other "DB Regio AG …" the DB Regio
@@ -395,7 +395,7 @@ in `project.pbxproj`: new files join their target automatically.
 - `Transit/Transitous/` – MOTIS client + `M*` DTOs, station-name cleanup, board dedup. Departures add arrivals going
   on as "Nur Ausstieg" (`continuingWithoutBoarding`, #105). A train drops a bus bay as its track (`MPlace.isBusBay`:
   "Steig F" at Hanau, at a German stop any track without a number, "A" at Koblenz Hbf #460) and a stop's own number (`hasStopNumberAsTrack`: 70–99 and not among the numbers `description` names; VRS "85" at
-  Köln Hbf #445, OWL "94" at Bielefeld #458), so DB Timetables fills the real one; DB's live track over it stays,
+  Köln Hbf #445, OWL "94" at Bielefeld #458), so DB OpenBoards fills the real one; DB's live track over it stays,
   not as a change. Every `PlatformInfo` drops a "Gl." in front of the number (`cleaned`; DELFI around Dresden, #451),
   also in saved journeys; trains also Paderborn's "G4" (`MPlace.trainTrack`). Search ranking `searchRank`: text match vs. nearness/size;
   also asks "<nearby town> <query>" (`NearbyTowns`, offline, so coordinates never leave the device), nearby stations
@@ -433,7 +433,7 @@ in `project.pbxproj`: new files join their target automatically.
   Zusatzhalte (`inserting`, `nextRegularStop`), `fillingMissingPlatforms` (e.g. Hamburg Hbf), `correctingTrainNames`
   ("RJ 171" Transitous calls "ICE 171"; names bahn.de gave are kept 6 weeks on the device, `TrainNameMemory`, and
   used before asking; a late answer renames the results, `JourneyResultsView.correctLateTrainNames`). Live times (`ezZeit`; `correctingFromBoard`, `applyingLiveTimes`,
-  `applyingLiveTimes(from:to:)`) beat DELFI's forecasts, but not a delay/early time DB Timetables set (`keepingDelays`),
+  `applyingLiveTimes(from:to:)`) beat DELFI's forecasts, but not a delay/early time DB OpenBoards set (`keepingDelays`),
   and never turn 2+ min early into on time (`turnsEarlyIntoOnTime`). The journey details (`journeyCourse`) are asked
   only by `LiveRun`, for legs and trip views alike: for a run underway or leaving within 12 h (`isRunningSoon`,
   `journeyStopsMaxAge`), hourly for one up to a week ahead that lacks a platform (`needsPlatforms`), platforms only for
@@ -522,7 +522,7 @@ in `project.pbxproj`: new files join their target automatically.
   cached 30 min; for NJ/EN/IR they replace the feed's (`overwriting`). `TransferDisposition` ("Anschluss wartet
   (nicht)" in `TransferRow`) via `disposition(from:to:)`/`dispositions(in:now:)` (`dispositionStatus`, 15 min ago to
   3 h ahead, notifies once per `notificationID`). `ExpertTimes` (`liveTimes(category:number:day:)`, `ExpertTimesCache`
-  2 min) referees bahn.de vs. DB Timetables in `applyingLiveTimes(…referee:)` (closer value wins, tie → Timetables).
+  2 min) referees bahn.de vs. DB OpenBoards in `applyingLiveTimes(…referee:)` (closer value wins, tie → OpenBoards).
 - `Transit/TrainNumberSearch.swift` (#183) – bahn.expert's `journey/find` lists a number's runs (`TrainNumberQuery`,
   `ranked` by `TrainSearchFilter`/`TrainSearchCountry`), `detailsByJourneyId` their stops; `run(of:)` finds the run on
   a stop's board so the trip comes from Transitous.
@@ -552,10 +552,17 @@ in `project.pbxproj`: new files join their target automatically.
   with a known track. App (`App/LiftAlerts.swift`): banner on `StationBoardView`, `TransferRow`/`LegCard` in
   `JourneyDetailView`; with Settings → Ticket & Reise → Stufenfrei reisen (`AppSettings.stepFree`, synced) also `JourneyCard`, a
   notification per lift and place (`notifiedIssues`) and the exit reminder's text. DEBUG: `-debugBrokenLifts YES`.
-- `Transit/Timetables/` – DB Timetables XML through `betterbahn2` (holds the key; only where App Attest works). Other
-  station levels via `/station` `meta`; no requests for trains over 4 h ago (`changesMemory`); without live data no
-  `actual` (no "+0"). Boards: `applyingRealtime(to:at:)` after bahn.de/Transitous (nothing changes without `fchg`).
-  The Worker asks IRIS first, the API Marketplace only on failure (60/min). `infersOnTime` only within 2 h;
+- `Transit/OpenBoards/` – DB OpenBoards (successor of Timetables, which DB is shutting down) through `betterbahn2`
+  (holds the key; only where App Attest works). No plan/changes split: the board of a station (`departures` or
+  `arrivals`, JSON) holds schedule and live time/platform per train (`OpenBoardsParser`), asked for a window that only
+  depends on the half hour of the time (`window(around:)`, 10 min back, 50 ahead, so one request serves a whole board)
+  and cached 4 min. A board covers the station's transfer area, and `lowerLevels` are added to the EVAs; the
+  train is found by category, number and planned time (`match`). `time` counts as live only when it differs from
+  `timeSchedule` or `timeType` is `REAL`, a `platform` only when it differs from `platformSchedule` (no made-up "+0").
+  Delay reasons: `risCauseCodes`/`risQualityDeviations` of `messages`, the codes of `TrainMessageCodes`. No requests
+  for trains over 4 h ago (`changesMemory`); without live data no
+  `actual` (no "+0"). Boards: `applyingRealtime(to:at:)` after bahn.de/Transitous (nothing changes without a board).
+  The free plan allows 10 requests/s. `infersOnTime` only within 2 h;
   `JourneyRefresher.droppingInferredOnTime` cleans older saves. `realtime(for:)` gives a leg's ends
   (`JourneyRefresher.refreshEnds`); a run's stops get `liveTrip` (`tripWithRealtime` + `fillMissingPlatforms`) through
   `LiveRun`, legs and trip views alike.
@@ -566,7 +573,7 @@ in `project.pbxproj`: new files join their target automatically.
   (`JourneyRefresher.refresh`, the part between origin and destination as a `Trip` via `run(of:)`/`applying(_:to:)`,
   `syncingEnds`) and the trip views (`AppModel.liveRun`, the whole run) alike, so the journey card and the run opened
   from it agree (before, ICE 279 showed +3/+18 on the card and "0" at every stop of the run). Fixed order: Transitous'
-  twin stops, DB Timetables (`liveTrip`, within `knowsChanges`), `CombinedProvider.completing` (whole runs only),
+  twin stops, DB OpenBoards (`liveTrip`, within `knowsChanges`), `CombinedProvider.completing` (whole runs only),
   bahn.de's `journeyCourse` (Zusatzhalte, `applyingLiveTimes(keepingDelays:referee:)`, platforms, sleeping cars; the
   12-h/one-week rules above), bahn.expert platforms, Czech platforms. A `baseline` (the remembered trip,
   `AppModel.liveTrips`; the saved leg, `Leg.savedTrip`) fills what the fresh answers lack (`keepingKnown`: live time,

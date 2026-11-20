@@ -1,25 +1,33 @@
 import Foundation
 
-/// One `<ar>`/`<dp>` (arrival/departure) side of a stop, from either a `plan` response (planned
-/// time/platform) or a `fchg` response (actual time/platform, cancellation).
-struct TimetablesEvent {
-    var planned: Date?
-    var actual: Date?
-    var plannedPlatform: String?
-    var actualPlatform: String?
-    var cancelled: Bool
-    /// The stop's `<m>` messages from `fchg` (filled in by `liveEvent`; `plan` never has any).
-    var messages: [TimetablesMessage] = []
+/// Which board an entry comes from: where a train arrives at a station or where it departs.
+enum BoardSide: Sendable {
+    case arrival, departure
 }
 
-/// One `<m>` element from `fchg`: a numeric delay-reason or quality code, reported at `timestamp`.
-struct TimetablesMessage: Hashable {
+/// One arrival or departure of a train at a station, from a DB OpenBoards board: the planned and the
+/// live time and platform, and whether DB cancelled the stop.
+struct OpenBoardsEvent: Sendable {
+    var planned: Date?
+    /// The live time, only when DB reports one: a delay or early time, or a time already run. A forecast
+    /// equal to the schedule stays `nil`, so it reads as "no change" (see `OpenBoardsClient.infersOnTime`).
+    var actual: Date?
+    var plannedPlatform: String?
+    /// The platform DB now says, only when it differs from the planned one (a Gleisänderung).
+    var actualPlatform: String?
+    var cancelled: Bool
+    /// The delay reasons and notices (DB's RIS codes) the board lists for this stop.
+    var messages: [OpenBoardsMessage] = []
+}
+
+/// A delay-reason or quality code (RIS cause code / quality deviation) a board lists for a stop.
+struct OpenBoardsMessage: Hashable, Sendable {
     var code: Int
     var timestamp: Date?
 
     /// Readable messages for `raw`, collected from any number of stops: unknown codes are dropped,
     /// and "all clear" codes (e.g. "keine Qualitätsmängel") remove the older notices they resolve.
-    static func resolve(_ raw: [TimetablesMessage]) -> [TrainMessage] {
+    static func resolve(_ raw: [OpenBoardsMessage]) -> [TrainMessage] {
         let shown = raw.filter { message in
             guard TrainMessageCodes.clearing[message.code] == nil else { return false }
             return !raw.contains { clearing in
@@ -35,32 +43,29 @@ struct TimetablesMessage: Hashable {
     }
 }
 
-/// One `<s>` (stop) element from a DB Timetables XML response. In `fchg`, most stops carry only
-/// `id`/`eva` — no `<tl>` — since they're meant to be correlated back to a `plan` response by `id`;
-/// only newly added trains (not in the original plan) carry their own `<tl>` there.
-struct TimetablesStop {
-    var id: String
+/// One entry of a board: a train's stop with its category, number and `event`.
+struct OpenBoardsEntry: Sendable {
+    /// The external category ("ICE", "RE", "S") and DB's internal one. For private operators the
+    /// category can be the operator's code instead of what the line says (National Express's RE1).
     var category: String?
+    var categoryInternal: String?
     var number: String?
-    var arrival: TimetablesEvent?
-    var departure: TimetablesEvent?
-    var messages: [TimetablesMessage] = []
-    /// The line as passengers see it (`<ar>`/`<dp>`'s `l`, e.g. "RE1"). For private operators this
-    /// differs from `category`, which is then the operator's code instead (National Express's RE1 is
-    /// `c="NX"`, Arverio's RE9 `c="ARV"`, metronom's RE3 `c="ME"`).
+    /// The line as passengers see it (e.g. "RE1").
     var lineName: String?
+    var event: OpenBoardsEvent
 
     /// Whether `category` (as taken from another provider's line name, e.g. "RE") names this train,
     /// either as DB's own category or as the letters of its line name.
     func isCategory(_ category: String) -> Bool {
         let category = category.uppercased()
         return self.category?.uppercased() == category
-            || lineName.flatMap(TimetablesClient.category(from:)) == category
+            || categoryInternal?.uppercased() == category
+            || lineName.flatMap(OpenBoardsClient.category(from:)) == category
     }
 }
 
-/// Overlay to apply onto a `Leg` once a matching `TimetablesStop` was found.
-public struct TimetablesLegOverride: Sendable {
+/// Overlay to apply onto a `Leg` once a matching `OpenBoardsEntry` was found.
+public struct OpenBoardsLegOverride: Sendable {
     public var departure: TimeInfo?
     public var departurePlatform: PlatformInfo?
     public var arrival: TimeInfo?
@@ -73,17 +78,17 @@ public struct TimetablesLegOverride: Sendable {
 }
 
 /// Reads live delay, platform and cancellation data straight from Deutsche Bahn's own dispatching
-/// feed (the "Timetables" API at apis.deutschebahn.com/db-api-marketplace, IRIS-based), since
-/// Transitous' realtime coverage for DB long-distance trains can lag by many minutes or be missing
-/// entirely. This API has no journey search of its own, and its `fchg` (full changes) endpoint only
-/// lists actual times/platforms keyed by a stop `id` that a matching `plan` response defines — so
-/// every lookup first finds the stop in `plan` (by category, train number and planned time) and then
-/// looks up that same `id` in `fchg` for whatever changed. Used to overlay onto legs that already
-/// came from another provider, not as a replacement for routing.
-public struct TimetablesClient: Sendable {
-    /// DB's Timetables API (API Marketplace) through the `Cloudflare/bahnde-proxy` Worker, which adds
-    /// the API key (a Worker secret, never in the app) and only answers the genuine app (`WorkerAuth`).
-    public static let baseURL = URL(string: "https://betterbahn2.betterbahn.workers.dev/timetables/v1")!
+/// feed (the "OpenBoards" API of the DB API Marketplace, which replaces Timetables), since Transitous'
+/// realtime coverage for DB long-distance trains can lag by many minutes or be missing entirely. This
+/// API has no journey search of its own: it lists the departures or arrivals of a station in a time
+/// window, each with its schedule and live time and platform. So every lookup asks the board of the
+/// train's station around its planned time and finds the train in it (by category, train number and
+/// planned time). Used to overlay onto legs that already came from another provider, not as a
+/// replacement for routing.
+public struct OpenBoardsClient: Sendable {
+    /// DB's OpenBoards API through the `Cloudflare/bahnde-proxy` Worker, which adds the API key (a Worker
+    /// secret, never in the app), builds DB's POST from this GET and only answers the genuine app (`WorkerAuth`).
+    public static let baseURL = URL(string: "https://betterbahn2.betterbahn.workers.dev/openboards/v1")!
     /// A stop only counts as a match when its planned time is this close to the leg's.
     static let matchTolerance: TimeInterval = 180
     static let berlin = TimeZone(identifier: "Europe/Berlin")!
@@ -99,9 +104,9 @@ public struct TimetablesClient: Sendable {
         self.auth = http.workerAuth(auth)
     }
 
-    /// Shared by every `TimetablesClient` (the app makes a fresh one per use), so the journey
+    /// Shared by every `OpenBoardsClient` (the app makes a fresh one per use), so the journey
     /// refresh and the trip views reuse each other's responses instead of hitting the API again.
-    /// Concurrent requests for the same path are merged into one.
+    /// Concurrent requests for the same board are merged into one.
     private actor Cache<Value: Sendable> {
         struct Entry { let date: Date; let value: Value }
         var entries: [String: Entry] = [:]
@@ -119,17 +124,28 @@ public struct TimetablesClient: Sendable {
             return value
         }
 
-        func clear(prefix: String) {
-            entries = entries.filter { !$0.key.hasPrefix(prefix) }
+        func clear() {
+            entries = [:]
         }
     }
-    private static let cache = Cache<[TimetablesStop]>()
-    private static let levelsCache = Cache<[String]>()
-    /// The schedule (`plan`) barely changes; live changes (`fchg`) are re-fetched at most this often.
-    static let planMaxAge: TimeInterval = 30 * 60
-    static let changesMaxAge: TimeInterval = 4 * 60
+    private static let cache = Cache<[OpenBoardsEntry]>()
+    /// A board carries the schedule and the live changes together, so it is re-fetched at most this often.
+    static let boardMaxAge: TimeInterval = 4 * 60
 
-    /// DB's change list (`fchg`) drops a train a few hours after it ran (#76's S7 was still there
+    /// A board is asked for a window that starts a little before the half hour holding the time looked
+    /// up and reaches well past it, so a train that runs early or late is still in it. The window only
+    /// depends on that half hour, so every lookup in it (a whole station board, the stops of a journey)
+    /// shares one request. Kept short, as a board lists at most 50 trains per product class.
+    static let slot: TimeInterval = 30 * 60
+    static let lookBehind: TimeInterval = 10 * 60
+    static let lookAhead: TimeInterval = 50 * 60
+
+    static func window(around time: Date) -> (start: Date, end: Date) {
+        let slotStart = (time.timeIntervalSince1970 / slot).rounded(.down) * slot
+        return (Date(timeIntervalSince1970: slotStart - lookBehind), Date(timeIntervalSince1970: slotStart + slot + lookAhead))
+    }
+
+    /// DB's change list drops a train a few hours after it ran (#76's S7 was still there
     /// 4 hours after arriving, gone after 6). Later DB only finds the schedule and would call the
     /// train on time, a made-up "+0", so a train whose last stop is longer ago isn't asked about.
     static let changesMemory: TimeInterval = 4 * 3600
@@ -138,79 +154,47 @@ public struct TimetablesClient: Sendable {
         lastPlanned.addingTimeInterval(changesMemory) > now
     }
 
-    /// DB only lists changes, so a stop it schedules without one counts as on time, but only for a
-    /// train about to run: hours ahead (a journey tomorrow) nothing is live yet, and an inferred
-    /// "pünktlich"/"+0" would be made up. Then only a change DB actually reports shows.
+    /// DB only has live times for a train about to run: hours ahead (a journey tomorrow) nothing is live
+    /// yet, and an inferred "pünktlich"/"+0" would be made up. Then only a change DB actually reports shows.
     static let onTimeLookahead: TimeInterval = 2 * 3600
 
     static func infersOnTime(departing start: Date, now: Date) -> Bool {
         start.timeIntervalSince(now) < onTimeLookahead
     }
 
-    /// Drops cached delays so the next lookup asks DB again (e.g. on pull-to-refresh).
+    /// Drops cached boards so the next lookup asks DB again (e.g. on pull-to-refresh).
     public static func invalidateDelays() async {
-        await cache.clear(prefix: "fchg/")
+        await cache.clear()
     }
 
-    private func get(path: String, maxAge: TimeInterval) async throws -> [TimetablesStop] {
+    /// The `side` board for `evas` between `start` and `end`.
+    private func board(_ side: BoardSide, evas: [String], from start: Date, to end: Date) async throws -> [OpenBoardsEntry] {
+        let name = side == .arrival ? "arrivals" : "departures"
+        let url = Self.baseURL.appending(path: name).appending(queryItems: [
+            URLQueryItem(name: "evas", value: evas.joined(separator: ",")),
+            URLQueryItem(name: "from", value: JSONDecoding.isoString(start)),
+            URLQueryItem(name: "to", value: JSONDecoding.isoString(end)),
+        ])
         // Only the app's real session shares the cache; a client on a custom session (tests, mocks)
-        // must never see another client's stored responses for the same path.
-        guard http.session === URLSession.shared else { return try await fetch(path: path) }
-        return try await Self.cache.value(for: path, maxAge: maxAge) { try await self.fetch(path: path) }
+        // must never see another client's stored responses for the same board.
+        guard http.session === URLSession.shared else { return try await fetch(url, side: side) }
+        return try await Self.cache.value(for: url.absoluteString, maxAge: Self.boardMaxAge) { try await self.fetch(url, side: side) }
     }
 
-    private func fetch(path: String) async throws -> [TimetablesStop] {
-        TimetablesXMLParser.parse(try await fetchData(path: path))
-    }
-
-    private func fetchData(path: String) async throws -> Data {
-        let url = Self.baseURL.appending(path: path)
+    private func fetch(_ url: URL, side: BoardSide) async throws -> [OpenBoardsEntry] {
         var request = URLRequest(url: url, timeoutInterval: http.timeout)
-        request.setValue("application/xml", forHTTPHeaderField: "Accept")
-        return try await http.sendRaw(request, auth: auth)
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        return try OpenBoardsParser.parse(try await http.sendRaw(request, auth: auth), side: side)
     }
 
-    /// The EVAs of `eva`'s other levels, from its `/station` entry's `meta` list. DB keeps the S-Bahn
-    /// of many big stations as a station of its own: Hamburg Hbf (8002549) has none of its S-Bahn
-    /// trains, "Hamburg Hbf (S-Bahn)" (8098549) all of them, likewise "Stuttgart Hbf (tief)",
-    /// "München Hbf (tief)" or "Berlin Gesundbrunnen(S)". Station search only finds the main one.
-    /// `meta` also lists bus stops and other non-EVA ids; only 7-digit German EVAs are kept.
-    private func otherLevels(of eva: String) async -> [String] {
-        let path = "station/\(eva)"
-        let fetch: @Sendable () async throws -> [String] = {
-            TimetablesXMLParser.metaStations(in: try await self.fetchData(path: path))
-        }
-        // Same rule as `get`: only the app's real session shares the cache.
-        let meta: [String]?
-        if http.session === URLSession.shared {
-            meta = try? await Self.levelsCache.value(for: path, maxAge: Self.levelsMaxAge, fetch: fetch)
-        } else {
-            meta = try? await fetch()
-        }
-        return (meta ?? []).filter { $0 != eva && $0.count == 7 && $0.hasPrefix("80") }
-    }
-
-    /// A station's other levels don't change; asked again at most once a day.
-    static let levelsMaxAge: TimeInterval = 24 * 3600
-
-    /// The hour-bucketed schedule (never carries delays) for `eva` around `time`.
-    private func plan(eva: String, around time: Date) async throws -> [TimetablesStop] {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = Self.berlin
-        let components = calendar.dateComponents([.year, .month, .day, .hour], from: time)
-        let date = String(format: "%02d%02d%02d", (components.year ?? 0) % 100, components.month ?? 0, components.day ?? 0)
-        let hour = String(format: "%02d", components.hour ?? 0)
-        return try await get(path: "plan/\(eva)/\(date)/\(hour)", maxAge: Self.planMaxAge)
-    }
-
-    /// Every currently known change (delay, platform swap, cancellation) at `eva`, keyed by stop id.
-    private func changes(eva: String) async throws -> [String: TimetablesStop] {
-        let stops = try await get(path: "fchg/\(eva)", maxAge: Self.changesMaxAge)
-        return Dictionary(stops.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+    /// The board around `time` at `eva` and its lower levels (see `lowerLevels`).
+    private func board(_ side: BoardSide, eva: String, around time: Date) async throws -> [OpenBoardsEntry] {
+        let window = Self.window(around: time)
+        return try await board(side, evas: [eva] + (Self.lowerLevels[eva] ?? []), from: window.start, to: window.end)
     }
 
     /// A station with several levels (Leipzig Hbf, Berlin Südkreuz) has no single EVA number in the offline list;
-    /// its main one will do here, since `scheduledStop` tries the other levels too. Before, such a stop needed
+    /// its main one will do here, since a board also lists the station's other levels. Before, such a stop needed
     /// bahn.de's station search on every refresh and lost DB's delays whenever bahn.de didn't answer (#411).
     private func eva(for station: Station) async -> String? {
         if let eva = station.evaNumber { return eva }
@@ -218,62 +202,19 @@ public struct TimetablesClient: Sendable {
         return try? await bahnDe.evaNumber(for: station)
     }
 
-    /// The event for `category`+`number` at `eva`, on whichever `side` (arrival or departure) has a
-    /// planned time within `matchTolerance` of `time`. Starts from the scheduled `plan` entry (which
-    /// always carries the planned platform, even when nothing has changed) and overlays whatever
-    /// `fchg` (Gleisänderungen, delays, cancellations) currently reports for that same stop.
-    ///
-    /// `scheduleSuffices` is for callers after the platform only: then a failed `fchg` (a big
-    /// station's full change list is large and can time out) still returns the scheduled event, so
-    /// the planned Gleis shows instead of none at all.
+    /// The event for `category`+`number` at `eva` on `side`, from the board around `time`, with its planned and
+    /// live time and platform. `nil` when the train isn't on the board or the board can't be had: treating
+    /// the bare schedule as "on time, running" would wipe out what the other provider knows.
     private func liveEvent(eva: String, category: String, number: String, time: Date,
-                            side: KeyPath<TimetablesStop, TimetablesEvent?>,
-                            scheduleSuffices: Bool = false) async -> TimetablesEvent? {
-        guard let found = await scheduledStop(eva: eva, category: category, number: number, time: time, side: side)
-        else { return nil }
-        let stop = found.stop
-        // Without `fchg` there's no telling whether the train is late or even cancelled – treating
-        // the bare schedule as "on time, running" would wipe out what the other provider knows.
-        guard let changes = try? await changes(eva: found.eva) else { return scheduleSuffices ? stop[keyPath: side] : nil }
-        var event = stop[keyPath: side]
-        if let changed = changes[stop.id] {
-            if let change = changed[keyPath: side] {
-                if let actual = change.actual { event?.actual = actual }
-                if let actualPlatform = change.actualPlatform { event?.actualPlatform = actualPlatform }
-                event?.cancelled = change.cancelled
-            }
-            event?.messages = changed.messages
-        }
-        return event
+                            side: BoardSide) async -> OpenBoardsEvent? {
+        guard let entries = try? await board(side, eva: eva, around: time) else { return nil }
+        return Self.match(entries, category: category, number: number, plannedTime: time)?.event
     }
 
-    /// The `plan` entry for `category`+`number` at `eva`, or else at one of its `lowerLevels` or other
-    /// levels DB names (see `otherLevels(of:)`), with the EVA it was found at, since `fchg` must be
-    /// asked there too. Without this, an S-Bahn ending at "Hamburg Hbf" was never found there, so its
-    /// arrival kept Transitous' forecast, which for S-Bahn lines can be several minutes off DB's own (#76).
-    private func scheduledStop(eva: String, category: String, number: String, time: Date,
-                               side: KeyPath<TimetablesStop, TimetablesEvent?>) async -> (eva: String, stop: TimetablesStop)? {
-        let known = [eva] + (Self.lowerLevels[eva] ?? [])
-        for candidate in known {
-            if let planned = try? await plan(eva: candidate, around: time),
-               let stop = Self.match(planned, category: category, number: number, plannedTime: time, side: side) {
-                return (candidate, stop)
-            }
-        }
-        for level in await otherLevels(of: eva) where !known.contains(level) {
-            if let planned = try? await plan(eva: level, around: time),
-               let stop = Self.match(planned, category: category, number: number, plannedTime: time, side: side) {
-                return (level, stop)
-            }
-        }
-        return nil
-    }
-
-    /// Big stations whose S-Bahn platforms Timetables lists as a station of their own, which station
-    /// search (and so `eva(for:)`) never returns. Without them an S-Bahn ending there got no DB delay
-    /// at all and kept Transitous' forecast, which often drops back to "on time" for stops further
-    /// ahead (issue #76: S4 running 3 minutes late, its arrival shown on time). Tried before asking
-    /// `/station`, so these work without it; any other station's levels come from there.
+    /// Big stations whose S-Bahn platforms DB lists as a station of their own, which station search (and so
+    /// `eva(for:)`) never returns. A board is asked for them together with the main one: without them an S-Bahn
+    /// ending there got no DB delay at all and kept Transitous' forecast, which often drops back to "on time" for
+    /// stops further ahead (issue #76: S4 running 3 minutes late, its arrival shown on time).
     static let lowerLevels: [String: [String]] = [
         "8000261": ["8098263"], // München Hbf (tief)
         "8000096": ["8098096"], // Stuttgart Hbf (tief)
@@ -288,7 +229,7 @@ public struct TimetablesClient: Sendable {
     /// the request failed), so callers can keep trusting whatever another provider said.
     public func departureCancelled(category: String, number: String, at station: Station, plannedTime: Date) async -> Bool? {
         guard let eva = await eva(for: station),
-              let event = await liveEvent(eva: eva, category: category, number: number, time: plannedTime, side: \.departure)
+              let event = await liveEvent(eva: eva, category: category, number: number, time: plannedTime, side: .departure)
         else { return nil }
         return event.cancelled
     }
@@ -299,15 +240,15 @@ public struct TimetablesClient: Sendable {
         !leg.isWalking && canLookUp(leg.line)
     }
 
-    /// Whether `line` is a train DB Timetables can be asked about (one with a category and number).
+    /// Whether `line` is a train DB's boards can be asked about (one with a category and number).
     public func canLookUp(_ line: Line?) -> Bool {
         line?.dispatchNumber != nil && line.flatMap { Self.category(from: $0.name) } != nil
     }
 
     /// Live data for `leg`'s departure and arrival, matched by category, train number and planned
-    /// time. Returns `nil` when nothing changed is known yet at either station, so callers should
+    /// time. Returns `nil` when nothing is known yet at either station, so callers should
     /// keep whatever schedule they already have.
-    public func realtime(for leg: Leg, now: Date = .now) async -> TimetablesLegOverride? {
+    public func realtime(for leg: Leg, now: Date = .now) async -> OpenBoardsLegOverride? {
         guard !leg.isWalking, let line = leg.line, let number = line.dispatchNumber,
               let category = Self.category(from: line.name) else { return nil }
 
@@ -317,12 +258,12 @@ public struct TimetablesClient: Sendable {
         var arrivalPlatform: PlatformInfo?
         var departureCancelled: Bool?
         var arrivalCancelled: Bool?
-        var messages: [TimetablesMessage] = []
+        var messages: [OpenBoardsMessage] = []
         let onTime = Self.infersOnTime(departing: leg.departure.planned, now: now)
 
         if let eva = await eva(for: leg.origin),
-           let event = await liveEvent(eva: eva, category: category, number: number, time: leg.departure.planned, side: \.departure) {
-            // DB lists only changes: a matched stop without one is on time (`infersOnTime`).
+           let event = await liveEvent(eva: eva, category: category, number: number, time: leg.departure.planned, side: .departure) {
+            // A matched stop without a live time is on time (`infersOnTime`).
             departure = TimeInfo(planned: leg.departure.planned,
                                  actual: event.actual ?? leg.departure.actual ?? (onTime ? leg.departure.planned : nil))
             departurePlatform = Self.mergedPlatform(existing: leg.departurePlatform, event: event)
@@ -331,7 +272,7 @@ public struct TimetablesClient: Sendable {
         }
 
         if let eva = await eva(for: leg.destination),
-           let event = await liveEvent(eva: eva, category: category, number: number, time: leg.arrival.planned, side: \.arrival) {
+           let event = await liveEvent(eva: eva, category: category, number: number, time: leg.arrival.planned, side: .arrival) {
             arrival = TimeInfo(planned: leg.arrival.planned,
                                actual: event.actual ?? leg.arrival.actual ?? (onTime ? leg.arrival.planned : nil))
             arrivalPlatform = Self.mergedPlatform(existing: leg.arrivalPlatform, event: event)
@@ -347,12 +288,12 @@ public struct TimetablesClient: Sendable {
         } else {
             nil
         }
-        return TimetablesLegOverride(departure: departure, departurePlatform: departurePlatform,
+        return OpenBoardsLegOverride(departure: departure, departurePlatform: departurePlatform,
                                       arrival: arrival, arrivalPlatform: arrivalPlatform, cancelled: cancelled,
-                                      messages: TimetablesMessage.resolve(messages))
+                                      messages: OpenBoardsMessage.resolve(messages))
     }
 
-    /// `leg`'s stopovers with DB Timetables' delays laid over them: where DB knows a stop its data wins
+    /// `leg`'s stopovers with DB OpenBoards' delays laid over them: where DB knows a stop its data wins
     /// (unchanged means on time once the train is about to run, see `infersOnTime`; not cancelled), and a
     /// stop DB can't match keeps whatever it already had.
     public func stopoversWithRealtime(for leg: Leg, now: Date = .now) async -> [Stopover] {
@@ -364,10 +305,10 @@ public struct TimetablesClient: Sendable {
     public func liveStopovers(for leg: Leg, now: Date = .now) async -> (stopovers: [Stopover], messages: [TrainMessage]) {
         guard canLookUp(leg), let line = leg.line else { return (leg.stopovers, []) }
         let (stopovers, messages) = await stopoversWithRealtime(leg.stopovers, line: line, now: now)
-        return (stopovers, TimetablesMessage.resolve(messages))
+        return (stopovers, OpenBoardsMessage.resolve(messages))
     }
 
-    /// `trip` with DB Timetables delays laid over it (see `stopoversWithRealtime(for:)`);
+    /// `trip` with DB OpenBoards delays laid over it (see `stopoversWithRealtime(for:)`);
     /// returned unchanged when the train has no category/number or ran too long ago (`changesMemory`).
     public func tripWithRealtime(_ trip: Trip, now: Date = .now) async -> Trip {
         guard let line = trip.line else { return trip }
@@ -376,30 +317,30 @@ public struct TimetablesClient: Sendable {
         var trip = trip
         let (stopovers, messages) = await stopoversWithRealtime(trip.stopovers, line: line, now: now)
         trip.stopovers = stopovers
-        trip.messages = TrainMessage.merged(trip.messages + TimetablesMessage.resolve(messages))
+        trip.messages = TrainMessage.merged(trip.messages + OpenBoardsMessage.resolve(messages))
         return trip
     }
 
-    private func stopoversWithRealtime(_ original: [Stopover], line: Line, now: Date) async -> ([Stopover], [TimetablesMessage]) {
+    private func stopoversWithRealtime(_ original: [Stopover], line: Line, now: Date) async -> ([Stopover], [OpenBoardsMessage]) {
         guard let number = line.dispatchNumber, let category = Self.category(from: line.name) else { return (original, []) }
         var stops = original
         // Judged once for the whole run, so every stop agrees: before, a train tomorrow showed "+0"
         // at the stops whose schedule DB already had and plain times further on.
         let onTime = original.first.flatMap { $0.departure?.planned ?? $0.arrival?.planned }
             .map { Self.infersOnTime(departing: $0, now: now) } ?? false
-        var messages: [TimetablesMessage] = []
-        await withTaskGroup(of: (Int, TimetablesEvent?, TimetablesEvent?).self) { group in
+        var messages: [OpenBoardsMessage] = []
+        await withTaskGroup(of: (Int, OpenBoardsEvent?, OpenBoardsEvent?).self) { group in
             for index in stops.indices {
                 let stop = stops[index]
                 group.addTask {
                     guard let eva = await self.eva(for: stop.station) else { return (index, nil, nil) }
-                    var arrival: TimetablesEvent?
-                    var departure: TimetablesEvent?
+                    var arrival: OpenBoardsEvent?
+                    var departure: OpenBoardsEvent?
                     if let time = stop.arrival?.planned {
-                        arrival = await self.liveEvent(eva: eva, category: category, number: number, time: time, side: \.arrival)
+                        arrival = await self.liveEvent(eva: eva, category: category, number: number, time: time, side: .arrival)
                     }
                     if let time = stop.departure?.planned {
-                        departure = await self.liveEvent(eva: eva, category: category, number: number, time: time, side: \.departure)
+                        departure = await self.liveEvent(eva: eva, category: category, number: number, time: time, side: .departure)
                     }
                     return (index, arrival, departure)
                 }
@@ -423,11 +364,11 @@ public struct TimetablesClient: Sendable {
         return (stops, messages)
     }
 
-    /// Combines whatever platform a caller already had with a DB Timetables `event`: a genuine
-    /// Gleisänderung (`event.actualPlatform`, from `fchg`) always wins and is overlaid onto the
+    /// Combines whatever platform a caller already had with a DB OpenBoards `event`: a genuine
+    /// Gleisänderung (`event.actualPlatform`) always wins and is overlaid onto the
     /// existing planned platform; otherwise, only when nothing was known at all, DB's own scheduled
-    /// platform (`event.plannedPlatform`, from `plan`) fills the gap rather than showing nothing.
-    private static func mergedPlatform(existing: PlatformInfo?, event: TimetablesEvent) -> PlatformInfo? {
+    /// platform (`event.plannedPlatform`) fills the gap rather than showing nothing.
+    private static func mergedPlatform(existing: PlatformInfo?, event: OpenBoardsEvent) -> PlatformInfo? {
         if let actualPlatform = event.actualPlatform {
             return PlatformInfo(planned: existing?.planned, actual: actualPlatform)
         } else if existing?.best == nil, let plannedPlatform = event.plannedPlatform {
@@ -440,7 +381,7 @@ public struct TimetablesClient: Sendable {
     /// first and last stop: Transitous' `v5/trip` response reliably carries a platform for
     /// `intermediateStops` but sometimes omits it for the leg's own `from`/`to` place (reported for
     /// the S15 at Berlin Hbf/Berlin Gesundbrunnen, which DB Navigator shows correctly) – using DB's
-    /// own Timetables ("IRIS") schedule. Only queried for stopovers that are actually missing a
+    /// own boards. Only queried for stopovers that are actually missing a
     /// platform, so a long route doesn't fire a lookup per stop; a stopover that already has one is
     /// left untouched (see `realtime(for:)` for overlaying live Gleisänderungen onto an existing leg).
     /// `trip` with DB's delays (`tripWithRealtime(_:)`) and missing platforms (`fillMissingPlatforms(in:)`).
@@ -463,11 +404,11 @@ public struct TimetablesClient: Sendable {
                     var arrivalPlatform: PlatformInfo?
                     var departurePlatform: PlatformInfo?
                     if needsArrival, let time = stop.arrival?.planned,
-                       let event = await self.liveEvent(eva: eva, category: category, number: number, time: time, side: \.arrival, scheduleSuffices: true) {
+                       let event = await self.liveEvent(eva: eva, category: category, number: number, time: time, side: .arrival) {
                         arrivalPlatform = Self.mergedPlatform(existing: stop.arrivalPlatform, event: event)
                     }
                     if needsDeparture, let time = stop.departure?.planned,
-                       let event = await self.liveEvent(eva: eva, category: category, number: number, time: time, side: \.departure, scheduleSuffices: true) {
+                       let event = await self.liveEvent(eva: eva, category: category, number: number, time: time, side: .departure) {
                         departurePlatform = Self.mergedPlatform(existing: stop.departurePlatform, event: event)
                     }
                     return (index, arrivalPlatform, departurePlatform)
@@ -484,7 +425,7 @@ public struct TimetablesClient: Sendable {
     /// Fills in the departure/arrival platform of any of `journey`'s train legs that Transitous left
     /// without one – whole feeds carry no track at all (e.g. every DB Regio NRW and National Express
     /// train at Aachen Hbf) and others only now and then, for ICEs and RJs as much as regional trains –
-    /// using DB's own Timetables ("IRIS") schedule, as DB Navigator shows it.
+    /// using DB's own boards, as DB Navigator shows it.
     public func fillMissingPlatforms(in journey: Journey) async -> Journey {
         var journey = journey
         await withTaskGroup(of: (Int, PlatformInfo?, PlatformInfo?).self) { group in
@@ -499,12 +440,12 @@ public struct TimetablesClient: Sendable {
                     var arrivalPlatform: PlatformInfo?
                     if needsDeparture, let eva = await self.eva(for: leg.origin),
                        let event = await self.liveEvent(eva: eva, category: category, number: number, time: leg.departure.planned,
-                                                        side: \.departure, scheduleSuffices: true) {
+                                                        side: .departure) {
                         departurePlatform = Self.mergedPlatform(existing: leg.departurePlatform, event: event)
                     }
                     if needsArrival, let eva = await self.eva(for: leg.destination),
                        let event = await self.liveEvent(eva: eva, category: category, number: number, time: leg.arrival.planned,
-                                                        side: \.arrival, scheduleSuffices: true) {
+                                                        side: .arrival) {
                         arrivalPlatform = Self.mergedPlatform(existing: leg.arrivalPlatform, event: event)
                     }
                     return (index, departurePlatform, arrivalPlatform)
@@ -521,7 +462,7 @@ public struct TimetablesClient: Sendable {
     /// Fills in a missing platform for any of `entries` – e.g. reported for Berlin Gesundbrunnen,
     /// where Transitous carries a platform for U-Bahn departures but not for the S-Bahn ones at the
     /// very same board, apparently a gap in S-Bahn Berlin's own feed rather than anything DB Navigator
-    /// hits – using DB's own Timetables ("IRIS") schedule. Only queried for entries actually missing a
+    /// hits – using DB's own boards. Only queried for entries actually missing a
     /// platform, and only one `eva` lookup for the whole board since every entry shares `station`.
     public func fillMissingPlatforms(in entries: [BoardEntry], at station: Station) async -> [BoardEntry] {
         guard let eva = await eva(for: station) else { return entries }
@@ -532,9 +473,8 @@ public struct TimetablesClient: Sendable {
                 guard entry.platform.best == nil, let number = entry.line.dispatchNumber,
                       let category = Self.category(from: entry.line.name) else { continue }
                 group.addTask {
-                    let event = entry.kind == .arrivals
-                        ? await self.liveEvent(eva: eva, category: category, number: number, time: entry.time.planned, side: \.arrival, scheduleSuffices: true)
-                        : await self.liveEvent(eva: eva, category: category, number: number, time: entry.time.planned, side: \.departure, scheduleSuffices: true)
+                    let event = await self.liveEvent(eva: eva, category: category, number: number, time: entry.time.planned,
+                                                     side: entry.kind == .arrivals ? .arrival : .departure)
                     guard let event else { return (index, nil) }
                     return (index, Self.mergedPlatform(existing: entry.platform, event: event))
                 }
@@ -546,26 +486,24 @@ public struct TimetablesClient: Sendable {
         return entries
     }
 
-    /// `entries` (one station's board) with DB Timetables' live data laid over every train, as the stop lists
+    /// `entries` (one station's board) with DB OpenBoards' live data laid over every train, as the stop lists
     /// do (`stopoversWithRealtime`): a delay or early time DB reports wins over bahn.de's and Transitous', a
     /// cancellation DB reports or doesn't report wins too, a platform swap is overlaid. A train DB reports no
-    /// change for keeps the time it had, or counts as on time once it is about to run (`infersOnTime`). A
-    /// train DB can't find, or every train when `fchg` can't be had (it would otherwise read as "on time,
-    /// running"), stays as it was. One `fchg` and a few `plan` hours serve the whole board (cached, requests
-    /// for the same path merged).
+    /// live time for keeps the time it had, or counts as on time once it is about to run (`infersOnTime`). A
+    /// train DB can't find, or every train when the board can't be had (it would otherwise read as "on time,
+    /// running"), stays as it was. A few boards serve the whole list (cached, requests for the same board merged).
     public func applyingRealtime(to entries: [BoardEntry], at station: Station, now: Date = .now) async -> [BoardEntry] {
         guard let eva = await eva(for: station) else { return entries }
         var entries = entries
-        await withTaskGroup(of: (Int, TimetablesEvent?).self) { group in
+        await withTaskGroup(of: (Int, OpenBoardsEvent?).self) { group in
             for index in entries.indices {
                 let entry = entries[index]
                 guard entry.line.product.isTrain, let number = entry.line.dispatchNumber,
                       let category = Self.category(from: entry.line.name),
                       Self.knowsChanges(until: entry.time.planned, now: now) else { continue }
                 group.addTask {
-                    let event = entry.kind == .arrivals
-                        ? await self.liveEvent(eva: eva, category: category, number: number, time: entry.time.planned, side: \.arrival)
-                        : await self.liveEvent(eva: eva, category: category, number: number, time: entry.time.planned, side: \.departure)
+                    let event = await self.liveEvent(eva: eva, category: category, number: number, time: entry.time.planned,
+                                                     side: entry.kind == .arrivals ? .arrival : .departure)
                     return (index, event)
                 }
             }
@@ -577,7 +515,7 @@ public struct TimetablesClient: Sendable {
         return entries
     }
 
-    static func applying(_ event: TimetablesEvent, to entry: BoardEntry, now: Date) -> BoardEntry {
+    static func applying(_ event: OpenBoardsEvent, to entry: BoardEntry, now: Date) -> BoardEntry {
         var entry = entry
         let onTime = infersOnTime(departing: entry.time.planned, now: now)
         entry.time.actual = event.actual ?? entry.time.actual ?? (onTime ? entry.time.planned : nil)
@@ -586,9 +524,9 @@ public struct TimetablesClient: Sendable {
         return entry
     }
 
-    /// Every scheduled departure/arrival at `station` matching `category` (optional, case-insensitive)
-    /// and `number`, across the requested window – straight from DB's own dispatching plan (`/plan`),
-    /// which lists every train by its real category and number regardless of how any particular
+    /// Every scheduled departure at `station` matching `category` (optional, case-insensitive)
+    /// and `number`, across the requested window – straight from DB's own departure board, which lists
+    /// every train by its real category and number regardless of how any particular
     /// journey-planning feed brands or names it. Used to confirm a user-named train really exists and
     /// find its true scheduled time when another provider's board doesn't carry it under a matching
     /// name (different branding – e.g. an ÖBB "RJ" that DB's own feed calls "ICE" – or misses the
@@ -600,29 +538,30 @@ public struct TimetablesClient: Sendable {
         guard let eva = await eva(for: station) else { return [] }
         let end = from.addingTimeInterval(TimeInterval(duration * 60))
         let hours = Self.planHours(from: from, duration: duration)
+        let evas = [eva] + (Self.lowerLevels[eva] ?? [])
 
-        let stops = await withTaskGroup(of: [TimetablesStop].self) { group in
+        let entries = await withTaskGroup(of: [OpenBoardsEntry].self) { group in
             for hour in hours {
-                group.addTask { (try? await self.plan(eva: eva, around: hour)) ?? [] }
+                group.addTask { (try? await self.board(.departure, evas: evas, from: hour, to: hour.addingTimeInterval(3600))) ?? [] }
             }
-            var all: [TimetablesStop] = []
+            var all: [OpenBoardsEntry] = []
             for await page in group { all += page }
             return all
         }
 
-        return stops
-            .filter { stop in
-                (category.map(stop.isCategory) ?? true)
-                    && stop.number.map { Self.sameNumber($0, number) } == true
+        return entries
+            .filter { entry in
+                (category.map(entry.isCategory) ?? true)
+                    && entry.number.map { Self.sameNumber($0, number) } == true
             }
-            .compactMap { ($0.departure ?? $0.arrival)?.planned }
+            .compactMap(\.event.planned)
             .filter { $0 >= from.addingTimeInterval(-60) && $0 <= end }
             .sorted()
     }
 
-    /// The `/plan` hour buckets covering `from … from + duration`. The cursor starts at the beginning of
+    /// The hour buckets covering `from … from + duration`. The cursor starts at the beginning of
     /// `from`'s hour (Berlin time), so the bucket holding the window's end is included even when `from`
-    /// isn't on the full hour. `/plan` is bucketed by hour; the count is capped so a generous window
+    /// isn't on the full hour. The count is capped so a generous window
     /// (e.g. the custom-train picker's default 8h) can't fire dozens of concurrent requests.
     static func planHours(from: Date, duration: Int) -> [Date] {
         var calendar = Calendar(identifier: .gregorian)
@@ -639,145 +578,127 @@ public struct TimetablesClient: Sendable {
 
     /// "ICE 571" -> "ICE". Also handles names with no space between category and number ("S15" -> "S",
     /// as Transitous names S-Bahn lines) by taking the leading non-digit run of the first token, since
-    /// IRIS always splits them into a separate category (`tl`'s `c`) and number (`n`).
+    /// DB always splits them into a separate category and number.
     static func category(from lineName: String) -> String? {
         guard let first = lineName.split(separator: " ").first else { return nil }
         let letters = first.prefix(while: { !$0.isNumber })
         return letters.isEmpty ? nil : letters.uppercased()
     }
 
-    /// The stop in `stops` for train `category`+`number` whose planned `side` time is closest to
+    /// The entry in `entries` for train `category`+`number` whose planned time is closest to
     /// `plannedTime` (and within `matchTolerance`). A train whose category matches neither DB's own
     /// category nor its line name still counts when its number and time do – the same number at the
     /// same station within minutes is that train, however each feed brands it (e.g. an ÖBB "RJ" that
     /// Transitous calls "ICE"). Before this, every private operator's train (NX, ARV, HLB, ME, VIA, …)
     /// failed the lookup, so boards, trips and journeys showed no Gleis where Transitous had none.
-    static func match(_ stops: [TimetablesStop], category: String, number: String, plannedTime: Date,
-                       side: KeyPath<TimetablesStop, TimetablesEvent?>) -> TimetablesStop? {
-        let sameNumber = stops.filter { $0.number.map { Self.sameNumber($0, number) } == true }
+    static func match(_ entries: [OpenBoardsEntry], category: String, number: String, plannedTime: Date) -> OpenBoardsEntry? {
+        let sameNumber = entries.filter { $0.number.map { Self.sameNumber($0, number) } == true }
         let sameCategory = sameNumber.filter { $0.isCategory(category) }
-        return closest(sameCategory, to: plannedTime, side: side) ?? closest(sameNumber, to: plannedTime, side: side)
+        return closest(sameCategory, to: plannedTime) ?? closest(sameNumber, to: plannedTime)
     }
 
-    private static func closest(_ stops: [TimetablesStop], to plannedTime: Date,
-                                side: KeyPath<TimetablesStop, TimetablesEvent?>) -> TimetablesStop? {
-        stops
-            .compactMap { stop -> (TimetablesStop, TimeInterval)? in
-                guard let planned = stop[keyPath: side]?.planned else { return nil }
-                return (stop, abs(planned.timeIntervalSince(plannedTime)))
+    private static func closest(_ entries: [OpenBoardsEntry], to plannedTime: Date) -> OpenBoardsEntry? {
+        entries
+            .compactMap { entry -> (OpenBoardsEntry, TimeInterval)? in
+                guard let planned = entry.event.planned else { return nil }
+                return (entry, abs(planned.timeIntervalSince(plannedTime)))
             }
             .min { $0.1 < $1.1 }
             .flatMap { $0.1 <= matchTolerance ? $0.0 : nil }
     }
 
-    /// IRIS train numbers sometimes carry leading zeros; compare numerically when possible.
+    /// Train numbers sometimes carry leading zeros; compare numerically when possible.
     static func sameNumber(_ a: String, _ b: String) -> Bool {
         if let x = Int(a), let y = Int(b) { return x == y }
         return a == b
     }
 }
 
-/// SAX-style parser for the small XML schema shared by the DB Timetables `plan`/`fchg`/`rchg`
-/// endpoints: a `<timetable>` of `<s id="...">` stops, each with an optional `<tl>` (trip label:
-/// category `c`, number `n`) and optional `<ar>`/`<dp>` (arrival/departure: planned time `pt`,
-/// changed time `ct`, planned/changed platform `pp`/`cp`, changed status `cs` — "c" means cancelled).
-/// `fchg` also nests `<m>` messages (type `t`, code `c`, timestamp `ts`, deleted `del`) in a stop and
-/// its `<ar>`/`<dp>`; the delay-reason (`t="d"`) and quality (`t="q"`) ones are collected per stop.
-enum TimetablesXMLParser {
-    static func parse(_ data: Data) -> [TimetablesStop] {
-        let delegate = Delegate()
-        let parser = XMLParser(data: data)
-        parser.delegate = delegate
-        parser.parse()
-        return delegate.stops
+/// Reads the JSON of an OpenBoards `departures` or `arrivals` response (`departures`/`arrivals` entries
+/// plus a `messages` container the entries point into by id).
+enum OpenBoardsParser {
+    static func parse(_ data: Data, side: BoardSide) throws -> [OpenBoardsEntry] {
+        let response = try JSONDecoding.decoder.decode(Response.self, from: data)
+        let codes = response.messages?.codesByID ?? [:]
+        return ((side == .arrival ? response.arrivals : response.departures) ?? []).compactMap { entry(from: $0, codes: codes) }
     }
 
-    /// The `meta` ids of every `<station>` in a `/station` response (`meta="8076116|8098549"`).
-    static func metaStations(in data: Data) -> [String] {
-        let delegate = StationDelegate()
-        let parser = XMLParser(data: data)
-        parser.delegate = delegate
-        parser.parse()
-        return delegate.meta
+    private static func entry(from item: Response.Item, codes: [Int: Int]) -> OpenBoardsEntry? {
+        guard let planned = item.timeSchedule else { return nil }
+        let cancelled = item.cancelled == true || item.journeyInfo?.journeyCancelled == true
+        // A cancelled additional stop was never part of the plan.
+        if item.additional == true, item.cancelled == true { return nil }
+        // `time` is the best known time; it only counts as live when DB reports it really ran or differs
+        // from the schedule. A forecast equal to the schedule says nothing about a train hours away.
+        let actual = item.time.flatMap { $0 != planned || item.timeType == "REAL" ? $0 : nil }
+        let plannedPlatform = item.platformSchedule?.name ?? item.platform?.name
+        let actualPlatform = item.platformSchedule?.name != nil && item.platform?.name != item.platformSchedule?.name
+            ? item.platform?.name : nil
+        let transport = item.transport
+        let number = transport?.journeyNumber.map(String.init) ?? transport?.operationalJourneyNumber
+        let event = OpenBoardsEvent(planned: planned, actual: actual, plannedPlatform: plannedPlatform,
+                                    actualPlatform: actualPlatform, cancelled: cancelled,
+                                    messages: (item.messages ?? []).compactMap { codes[$0] }.map { OpenBoardsMessage(code: $0, timestamp: nil) })
+        return OpenBoardsEntry(category: transport?.category, categoryInternal: transport?.categoryInternal, number: number,
+                               lineName: transport?.line?.name, event: event)
     }
 
-    private final class StationDelegate: NSObject, XMLParserDelegate {
-        var meta: [String] = []
+    private struct Response: Decodable {
+        var departures: [Item]?
+        var arrivals: [Item]?
+        var messages: Messages?
 
-        func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?,
-                    qualifiedName: String?, attributes: [String: String] = [:]) {
-            guard elementName == "station", let ids = attributes["meta"] else { return }
-            meta += ids.split(separator: "|").map(String.init)
+        struct Item: Decodable {
+            var cancelled: Bool?
+            var additional: Bool?
+            var time: Date?
+            var timeSchedule: Date?
+            var timeType: String?
+            var platform: Platform?
+            var platformSchedule: Platform?
+            var messages: [Int]?
+            var transport: Transport?
+            var journeyInfo: JourneyInfo?
         }
-    }
 
-    private final class Delegate: NSObject, XMLParserDelegate {
-        var stops: [TimetablesStop] = []
-        private var id: String?
-        private var category: String?
-        private var number: String?
-        private var arrival: TimetablesEvent?
-        private var departure: TimetablesEvent?
-        private var messages: [TimetablesMessage] = []
-        private var lineName: String?
+        struct Platform: Decodable {
+            var name: String?
+        }
 
-        func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?,
-                    qualifiedName: String?, attributes: [String: String] = [:]) {
-            switch elementName {
-            case "s":
-                id = attributes["id"]; category = nil; number = nil; arrival = nil; departure = nil; messages = []; lineName = nil
-            case "tl":
-                category = attributes["c"]
-                number = attributes["n"]
-            case "ar":
-                arrival = Self.event(from: attributes)
-                lineName = lineName ?? attributes["l"]
-            case "dp":
-                departure = Self.event(from: attributes)
-                lineName = lineName ?? attributes["l"]
-            case "m":
-                guard id != nil, attributes["t"] == "d" || attributes["t"] == "q", attributes["del"] != "1",
-                      let code = attributes["c"].flatMap({ Int($0) }) else { break }
-                messages.append(TimetablesMessage(code: code, timestamp: attributes["ts"].flatMap { Self.parseTime(String($0.prefix(10))) }))
-            default: break
+        struct Transport: Decodable {
+            var category: String?
+            var categoryInternal: String?
+            var journeyNumber: Int?
+            var operationalJourneyNumber: String?
+            var line: Line?
+        }
+
+        struct Line: Decodable {
+            var name: String?
+        }
+
+        struct JourneyInfo: Decodable {
+            var journeyCancelled: Bool?
+        }
+
+        /// The delay-reason (`risCauseCodes`) and quality (`risQualityDeviations`) messages, which the entries
+        /// point to by `messageID`; their `code` is the same number as IRIS's (see `TrainMessageCodes`).
+        struct Messages: Decodable {
+            var risCauseCodes: [Code]?
+            var risQualityDeviations: [Code]?
+
+            struct Code: Decodable {
+                var code: String?
+                var messageID: Int?
             }
-        }
 
-        func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName: String?) {
-            guard elementName == "s", let id else { return }
-            // Keep the id around until here: `<m>` elements only count while inside a stop.
-            defer { self.id = nil }
-            guard arrival != nil || departure != nil || !messages.isEmpty else { return }
-            stops.append(TimetablesStop(id: id, category: category, number: number, arrival: arrival,
-                                        departure: departure, messages: messages, lineName: lineName))
-        }
-
-        private static func event(from attributes: [String: String]) -> TimetablesEvent? {
-            let planned = attributes["pt"].flatMap(parseTime)
-            let actual = attributes["ct"].flatMap(parseTime)
-            let cancelled = attributes["cs"] == "c"
-            // `fchg` reports a cancellation as just `cs="c" clt="…"` (no `pt`/`ct`), so the status
-            // alone must still make an event — otherwise every DB cancellation got dropped here.
-            guard planned != nil || actual != nil || cancelled else { return nil }
-            return TimetablesEvent(planned: planned, actual: actual, plannedPlatform: attributes["pp"],
-                                    actualPlatform: attributes["cp"], cancelled: cancelled)
-        }
-
-        /// "YYMMDDHHmm" in German local time.
-        private static func parseTime(_ string: String) -> Date? {
-            guard string.count == 10, string.allSatisfy(\.isNumber) else { return nil }
-            let digits = Array(string)
-            func pair(_ index: Int) -> Int? { Int(String(digits[index...index + 1])) }
-            guard let yy = pair(0), let mm = pair(2), let dd = pair(4), let hh = pair(6), let min = pair(8) else { return nil }
-            var calendar = Calendar(identifier: .gregorian)
-            calendar.timeZone = TimetablesClient.berlin
-            var components = DateComponents()
-            components.year = 2000 + yy
-            components.month = mm
-            components.day = dd
-            components.hour = hh
-            components.minute = min
-            return calendar.date(from: components)
+            var codesByID: [Int: Int] {
+                var result: [Int: Int] = [:]
+                for message in (risCauseCodes ?? []) + (risQualityDeviations ?? []) {
+                    if let id = message.messageID, let code = message.code.flatMap({ Int($0) }) { result[id] = code }
+                }
+                return result
+            }
         }
     }
 }

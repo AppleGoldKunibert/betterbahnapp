@@ -68,7 +68,7 @@ struct JourneyDetailView: View {
         }
         .closesMenusOnScroll()
         .refreshable {
-            await TimetablesClient.invalidateDelays()
+            await OpenBoardsClient.invalidateDelays()
             await refreshRealtime()
             await loadDispositions()
             await loadCoachAdvice()
@@ -343,7 +343,7 @@ struct JourneyDetailView: View {
     private func fillMissingPlatforms() async {
         guard !readOnly else { return }
         var filled = await model.provider.completingStopsAndPlatforms(of: journey, deadline: .seconds(3))
-        if let timetables = model.timetablesClient {
+        if let timetables = model.openBoardsClient {
             filled = await timetables.fillMissingPlatforms(in: filled)
         }
         guard filled != journey else { return }

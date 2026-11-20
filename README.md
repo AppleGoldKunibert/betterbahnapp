@@ -10,7 +10,7 @@ BetterBahn is a private, non-commercial project and is **not affiliated with Deu
 
 Journeys, boards and trips come from [Transitous](https://transitous.org) (see its
 [sources](https://transitous.org/sources/)). Some extras come from bahn.de (through a proxy Worker),
-DB Timetables, [vagonweb.cz](https://www.vagonweb.cz) (used with permission), bahn.expert,
+DB OpenBoards, [vagonweb.cz](https://www.vagonweb.cz) (used with permission), bahn.expert,
 bahn.jetzt, [Träwelling](https://traewelling.de) and map tiles from
 [OpenStreetMap](https://www.openstreetmap.org/copyright) / [OpenRailwayMap](https://www.openrailwaymap.org).
 Please respect each service's terms when you build on this code.

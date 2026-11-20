@@ -10,7 +10,7 @@ features or data flows change (and update the privacy policy in `Cloudflare/work
   `betterbahn-stats`, whose D1 database is set up as in `Cloudflare/stats/README.md`, and
   `betterbahn-push` with its APNs key, as in `Cloudflare/checkin-push/README.md`, and `betterbahn-live` with
   the same key and its D1 database, as in `Cloudflare/live-activity/README.md`),
-  `DB_CLIENT_ID`/`DB_API_KEY` in `betterbahn2` (its Marketplace application subscribed to Timetables and FaSta), and `ALLOW_UNATTESTED` removed once no old builds
+  `DB_CLIENT_ID`/`DB_API_KEY` in `betterbahn2` (its Marketplace application subscribed to OpenBoards and FaSta, and to Timetables while old app builds are around), and `ALLOW_UNATTESTED` removed once no old builds
   are left. The privacy policy Worker (`betterbahn`) has the controller's name filled in, its KV
   namespace `SHARES` and `TOKEN_SECRET` set (share links), and the App ID has Associated Domains.
 - **Privacy policy URL:** `https://betterbahn.betterbahn.workers.dev/datenschutz`.
@@ -70,7 +70,7 @@ features or data flows change (and update the privacy policy in `Cloudflare/work
 - vagonweb.cz (planned Wagenreihung, train types) is used with the permission of vagonweb (issue #95);
   keep that email in case App Review asks. The app credits it ("Daten: vagonweb.cz").
 - Attribution (#103): Settings → Datenquellen lists every service with links (Transitous sources,
-  DB Timetables and DB FaSta under CC BY 4.0, OpenStreetMap, OpenRailwayMap, bahn.de, vagonweb, bahn.expert,
+  DB OpenBoards, DB FaSta (CC BY 4.0), OpenStreetMap, OpenRailwayMap, bahn.de, vagonweb, bahn.expert,
   bahn.jetzt, Träwelling, zug.network for check-in emojis, Open-Meteo under CC BY 4.0 for the weather, #385, also credited in
   the weather popover); the map legend links OSM and OpenRailwayMap. All requests except the
   bahn.de proxy send `HTTPClient.identifyingUserAgent` (app version + `/support` contact).

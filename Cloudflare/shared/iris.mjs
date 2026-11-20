@@ -1,17 +1,17 @@
 // DB's IRIS, the keyless service behind DB Timetables that bahn.expert's boards use too: a train's stop is found
 // by category, number and planned time in the station's schedule for that hour (`plan`), its live times, platform
 // and cancellation come from the station's change list (`fchg`), keyed by the stop's ID. As the app's
-// `TimetablesClient` (Packages/BetterBahnKit/Sources/BetterBahnKit/Transit/Timetables/TimetablesClient.swift).
+// `OpenBoardsClient` (Packages/BetterBahnKit/Sources/BetterBahnKit/Transit/OpenBoards/OpenBoardsClient.swift).
 // Used by `betterbahn-live` (Live Activities) and `betterbahn-push` (regular trips).
 
 export const IRIS = "https://iris.noncd.db.de/iris-tts/timetable/";
 const TIMEOUT = 8000;
 // IRIS answers these for "no such data" (as bahn.expert and the bahn.de proxy treat them).
 const NO_DATA_STATUSES = new Set([400, 404, 410]);
-/// A stop only counts as the train's when its planned time is this close (`TimetablesClient.matchTolerance`).
+/// A stop only counts as the train's when its planned time is this close (`OpenBoardsClient.matchTolerance`).
 const MATCH_TOLERANCE = 180;
 
-/// Big stations whose S-Bahn platforms IRIS lists as a station of their own (`TimetablesClient.lowerLevels`).
+/// Big stations whose S-Bahn platforms IRIS lists as a station of their own (`OpenBoardsClient.lowerLevels`).
 export const LOWER_LEVELS = {
     "8000261": ["8098263"], // München Hbf (tief)
     "8000096": ["8098096"], // Stuttgart Hbf (tief)
@@ -73,7 +73,7 @@ export function planPath(eva, seconds) {
 }
 
 /// The train `category` + `number` whose planned `side` time is closest to `planned` (within the tolerance).
-/// The same number counts under another category too, as for private operators (`TimetablesClient.match`).
+/// The same number counts under another category too, as for private operators (`OpenBoardsClient.match`).
 export function matchStop(stops, category, number, planned, side) {
     const sameNumber = stops.filter(stop => stop.number != null && sameTrainNumber(stop.number, number));
     const sameCategory = sameNumber.filter(stop => isCategory(stop, category));
@@ -102,7 +102,7 @@ function isCategory(stop, category) {
     return stop.category?.toUpperCase() === wanted || categoryOf(stop.lineName) === wanted;
 }
 
-/// "ICE 571" → "ICE", "S15" → "S" (`TimetablesClient.category(from:)`).
+/// "ICE 571" → "ICE", "S15" → "S" (`OpenBoardsClient.category(from:)`).
 export function categoryOf(lineName) {
     const first = lineName?.split(" ").find(Boolean);
     const letters = first?.match(/^\D*/)[0];

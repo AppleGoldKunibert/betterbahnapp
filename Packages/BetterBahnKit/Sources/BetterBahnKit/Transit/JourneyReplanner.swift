@@ -30,9 +30,9 @@ public struct JourneyReplanner: Sendable {
     public let provider: any TransitProvider
     /// DB's own live delays, laid over the routes found – Transitous' realtime for DB trains can lag
     /// or be missing, which would otherwise suggest transfers that today's delays already broke.
-    public let timetables: TimetablesClient?
+    public let timetables: OpenBoardsClient?
 
-    public init(provider: any TransitProvider, timetables: TimetablesClient? = nil) {
+    public init(provider: any TransitProvider, timetables: OpenBoardsClient? = nil) {
         self.provider = provider
         self.timetables = timetables
     }

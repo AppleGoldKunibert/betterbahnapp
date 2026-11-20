@@ -390,7 +390,7 @@ struct StationBoardView: View {
             // early times and cancellations over bahn.de's and Transitous' (which show a train that runs early
             // as on time). Some feeds (e.g. S-Bahn Berlin's own) also leave the platform out entirely even at
             // stations where other lines on the same board carry one; that gap is filled from DB's schedule.
-            if let timetables = model.timetablesClient {
+            if let timetables = model.openBoardsClient {
                 let live = await timetables.applyingRealtime(to: loaded, at: station)
                 let filled = await timetables.fillMissingPlatforms(in: live, at: station)
                 guard window == (windowOffset, windowLength) else { return }
@@ -438,7 +438,7 @@ struct StationBoardView: View {
         let start = baseTime.addingTimeInterval(TimeInterval(pageOffset * 60))
         do {
             var page = try await model.provider.board(kind, at: station, date: start, duration: Self.page, products: products)
-            if let timetables = model.timetablesClient {
+            if let timetables = model.openBoardsClient {
                 page = await timetables.fillMissingPlatforms(in: page, at: station)
             }
             guard key == reloadKey else { return }

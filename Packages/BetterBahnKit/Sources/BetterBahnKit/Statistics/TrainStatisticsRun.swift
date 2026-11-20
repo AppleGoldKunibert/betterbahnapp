@@ -231,7 +231,7 @@ extension TrainStatistics {
     /// The EVA number a station is kept under in the statistics: the lower levels of the big stations ("Berlin
     /// Hbf (tief)") are folded into the main station (as `Cloudflare/stats` does).
     static func mainStationEVA(_ eva: String) -> String {
-        for (main, lowers) in TimetablesClient.lowerLevels where lowers.contains(eva) { return main }
+        for (main, lowers) in OpenBoardsClient.lowerLevels where lowers.contains(eva) { return main }
         return eva
     }
 }

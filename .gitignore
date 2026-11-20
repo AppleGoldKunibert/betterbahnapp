@@ -68,7 +68,7 @@ Packages/BetterBahnKit/Package.resolved
 
 # The DB Timetables key used to live in DefaultCredentials.swift; it's now a secret of the
 # bahn.de proxy Worker. Keep any old copy out of the repo.
-Packages/BetterBahnKit/Sources/BetterBahnKit/Transit/Timetables/DefaultCredentials.swift
+Packages/BetterBahnKit/Sources/BetterBahnKit/Transit/OpenBoards/DefaultCredentials.swift
 Config/DefaultCredentials.swift.old
 /CLAUDE.md
 

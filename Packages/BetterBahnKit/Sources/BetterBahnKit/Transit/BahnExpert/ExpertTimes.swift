@@ -99,7 +99,7 @@ extension BahnExpertClient {
     public func fillingCzechLiveTimes(in stopovers: [Stopover], line: Line?) async -> [Stopover] {
         guard stopovers.contains(where: Self.lacksCzechLiveTime), let line, let number = line.dispatchNumber.flatMap({ Int($0) }),
               let first = stopovers.lazy.compactMap({ $0.departure?.planned ?? $0.arrival?.planned }).first,
-              let times = await ExpertTimesCache.shared.times(category: TimetablesClient.category(from: line.name), number: number,
+              let times = await ExpertTimesCache.shared.times(category: OpenBoardsClient.category(from: line.name), number: number,
                                                               day: BahnDeClient.berlinDay(first), using: self)
         else { return stopovers }
         return Self.fillingCzechLiveTimes(in: stopovers, from: times)

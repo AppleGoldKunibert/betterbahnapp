@@ -63,7 +63,7 @@ public struct FacilityClient: Sendable {
 
     /// The lifts out of order now; nil when DB can't be asked (no network, no App Attest token).
     public func brokenLifts() async -> [BrokenLift]? {
-        // Only the app's real session shares the cache, as in `TimetablesClient`.
+        // Only the app's real session shares the cache, as in `OpenBoardsClient`.
         guard http.session === URLSession.shared else { return try? await fetch() }
         return try? await Self.cache.value(maxAge: Self.maxAge) { try await fetch() }
     }

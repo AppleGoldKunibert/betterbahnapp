@@ -130,6 +130,75 @@ test("Timetables answers are cached whichever source gave them", async () => {
     assert.equal(failing.store.size, 0);
 });
 
+const OPENBOARDS = "https://apis.deutschebahn.com/db-api-marketplace/apis/open-boards/v1/";
+const boardQuery = "evas=8000105,8098105&from=2026-11-20T12:00:00Z&to=2026-11-20T13:30:00Z";
+const boardRequest = async (board = "departures", query = boardQuery) =>
+    new Request(`${base}/openboards/v1/${board}?${query}`, { headers: { [TOKEN_HEADER]: await accessToken("secret") } });
+
+test("OpenBoards needs an App Attest token and the API key", async () => {
+    const fetch = fakeFetch(200, "{}");
+    assert.equal((await handleRequest(new Request(`${base}/openboards/v1/departures?${boardQuery}`), timetablesEnv, { fetch, cache: null })).status, 401);
+    assert.equal((await handleRequest(await boardRequest(), { ...open, TOKEN_SECRET: "secret" }, { fetch, cache: null })).status, 503);
+    const post = await handleRequest(new Request(`${base}/openboards/v1/departures?${boardQuery}`, { method: "POST" }), timetablesEnv, { fetch, cache: null });
+    assert.equal(post.status, 405);
+    for (const path of ["/openboards/v1/", "/openboards/v1/stations", "/openboards/v1/departures/x"]) {
+        assert.equal((await handleRequest(new Request(base + path), open, { fetch, cache: null })).status, 404, path);
+    }
+    assert.equal(fetch.calls.length, 0);
+});
+
+test("OpenBoards builds the POST itself from a validated query", async () => {
+    const fetch = fakeFetch(200, '{"departures":[]}');
+    const response = await handleRequest(await boardRequest("arrivals"), timetablesEnv, { fetch, cache: null });
+    assert.equal(response.status, 200);
+    assert.equal(fetch.calls.length, 1);
+    const { url, init } = fetch.calls[0];
+    assert.equal(url, `${OPENBOARDS}arrivals`);
+    assert.equal(init.method, "POST");
+    assert.equal(init.headers["DB-Client-Id"], "client");
+    assert.equal(init.headers["DB-Api-Key"], "key");
+    assert.deepEqual(JSON.parse(init.body), {
+        stopPlaceOrStation: { evaNumbers: ["8000105", "8098105"] },
+        timeWindow: { timeStart: "2026-11-20T12:00:00.000Z", timeEnd: "2026-11-20T13:30:00.000Z" },
+        maxEntriesPerTransportType: 50,
+        languages: ["deu"],
+    });
+});
+
+test("OpenBoards turns a bad query into 400 without spending the key", async () => {
+    const fetch = fakeFetch(200, "{}");
+    const bad = [
+        "from=2026-11-20T12:00:00Z&to=2026-11-20T13:00:00Z",
+        "evas=abc&from=2026-11-20T12:00:00Z&to=2026-11-20T13:00:00Z",
+        "evas=8000105&from=2026-11-20T12:00:00Z",
+        "evas=8000105&from=2026-11-20T13:00:00Z&to=2026-11-20T12:00:00Z",
+        "evas=8000105&from=2026-11-20T12:00:00Z&to=2026-11-20T21:00:00Z",
+        "evas=8000105&from=soon&to=later",
+        "evas=1000001,1000002,1000003,1000004,1000005,1000006&from=2026-11-20T12:00:00Z&to=2026-11-20T13:00:00Z",
+    ];
+    for (const query of bad) {
+        assert.equal((await handleRequest(await boardRequest("departures", query), timetablesEnv, { fetch, cache: null })).status, 400, query);
+    }
+    assert.equal(fetch.calls.length, 0);
+});
+
+test("OpenBoards takes a '+' offset that arrived as a space and caches the same board once", async () => {
+    const fetch = fakeFetch(200, '{"departures":[]}');
+    const cache = fakeCache();
+    const first = await handleRequest(await boardRequest("departures", "evas=8000105&from=2026-11-20T13:00:00+01:00&to=2026-11-20T14:30:00+01:00"),
+        timetablesEnv, { fetch, cache });
+    assert.equal(first.status, 200);
+    assert.equal(first.headers.get("Cache-Control"), "public, max-age=30");
+    const second = await handleRequest(await boardRequest("departures", "evas=8000105&from=2026-11-20T12:00:00Z&to=2026-11-20T13:30:00Z"),
+        timetablesEnv, { fetch, cache });
+    assert.equal(second.headers.get("X-Proxy-Cache"), "HIT");
+    assert.equal(fetch.calls.length, 1);
+    const failing = fakeCache();
+    const error = await handleRequest(await boardRequest(), timetablesEnv, { fetch: fakeFetch(429, "quota"), cache: failing });
+    assert.equal(error.status, 429);
+    assert.equal(failing.store.size, 0);
+});
+
 const FASTA = "https://apis.deutschebahn.com/db-api-marketplace/apis/fasta/v2/facilities?type=ELEVATOR&state=INACTIVE";
 const fastaRequest = async (query = "") => new Request(`${base}/fasta/v2/facilities${query}`, { headers: { [TOKEN_HEADER]: await accessToken("secret") } });
 

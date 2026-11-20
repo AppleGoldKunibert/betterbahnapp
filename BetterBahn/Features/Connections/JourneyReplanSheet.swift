@@ -1028,7 +1028,7 @@ struct JourneyReplanSheet: View {
         do {
             let loaded = try await model.provider.trip(for: leg)
             var fresh = loaded
-            if let timetables = model.timetablesClient {
+            if let timetables = model.openBoardsClient {
                 fresh = await timetables.tripWithRealtime(loaded)
             }
             // The full trip has different stop IDs than the leg's own stops – re-seed against it.

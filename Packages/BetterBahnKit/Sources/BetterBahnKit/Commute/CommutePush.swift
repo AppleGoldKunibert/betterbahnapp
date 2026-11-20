@@ -50,7 +50,7 @@ public struct CommuteWatch: Codable, Sendable, Equatable {
         var legs: [Leg] = []
         for leg in journey.transitLegs {
             guard let line = leg.line, let number = line.dispatchNumber,
-                  let category = TimetablesClient.category(from: line.name),
+                  let category = OpenBoardsClient.category(from: line.name),
                   let fromEVA = await eva(leg.origin), let toEVA = await eva(leg.destination) else { return nil }
             legs.append(Leg(line: line.displayName, category: category, number: number,
                             from: Stop(eva: fromEVA, name: leg.origin.displayName, time: Int(leg.departure.planned.timeIntervalSince1970)),

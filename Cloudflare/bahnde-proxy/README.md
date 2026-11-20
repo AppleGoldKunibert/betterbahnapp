@@ -1,6 +1,6 @@
-# Timetables, lift status and App Attest Worker (`betterbahn2`)
+# OpenBoards, Timetables, lift status and App Attest Worker (`betterbahn2`)
 
-This Worker forwards DB's Timetables API and the lifts out of order from DB's FaSta API with our API key and hands out the App Attest tokens every request
+This Worker forwards DB's OpenBoards API (the successor of Timetables), DB's Timetables API (for app builds that still ask it) and the lifts out of order from DB's FaSta API with our API key and hands out the App Attest tokens every request
 to our servers needs. It used to forward bahn.de's web API too (`/web/api/…`), but bahn.de refuses Workers
 since October 2026; the app asks bahn.de only through `../../Server/bahnde-proxy`, so those paths are gone.
 The app still builds its bahn.de URLs on this Worker's address (`BahnDeClient.baseURL`) and `BahnDeProxy`
@@ -8,6 +8,7 @@ rewrites them to the server.
 
 | Path | Cached for |
 | --- | --- |
+| `/openboards/v1/{departures,arrivals}?evas=<eva,…>&from=<ISO>&to=<ISO>` | 30 s |
 | `/timetables/v1/plan/<eva>/<yymmdd>/<hh>` | 30 min |
 | `/timetables/v1/fchg/<eva>` | 30 s |
 | `/timetables/v1/station/<eva>` | 1 day |
@@ -16,7 +17,12 @@ rewrites them to the server.
 Only these GET paths (and `/auth/…`) are allowed; everything else is 404. Errors are passed through uncached.
 `GET /health` answers without calling upstream.
 
-Timetables requests go to the keyless IRIS (`iris.noncd.db.de`, the service behind Timetables, which DB's own
+OpenBoards (`/openboards/v1/…`) takes a GET so the app can't send any other request with our key: `evas` (1 to 5 EVA
+numbers) and `from`/`to` (ISO 8601, at most 8 h apart) are validated (400 otherwise), and the Worker POSTs DB's
+`departures`/`arrivals` with `stopPlaceOrStation.evaNumbers`, `timeWindow`, `maxEntriesPerTransportType: 50` and
+German texts. Boards are cached under the normalized request. It needs the API key, and its answer is DB's JSON as is.
+
+Timetables is on its way out (DB is reported to switch it off around mid-2027). Its requests go to the keyless IRIS (`iris.noncd.db.de`, the service behind Timetables, which DB's own
 departure board uses) first. Only when IRIS fails (error, timeout, 5xx, 429) they go to DB's API Marketplace with
 `DB-Client-Id`/`DB-Api-Key` from this Worker's secrets, so the key never ships in the app and the Marketplace's
 60 calls/minute are kept for when IRIS is down. IRIS's "no data" answers (400/404/410) are passed on without a
@@ -25,7 +31,7 @@ fallback. DB marked IRIS deprecated, so the Marketplace stays configured.
 `/fasta/v2/facilities` (#486) always asks DB's FaSta API for every lift in Germany that is out of order
 (`?type=ELEVATOR&state=INACTIVE`, the app's query is ignored), so all users share one cached list and the app
 never says which station it looks at. It needs the API key, and the Marketplace application behind
-`DB_CLIENT_ID` must be subscribed to "FaSta – Station Facilities Status" as well as Timetables.
+`DB_CLIENT_ID` must be subscribed to "OpenBoards" and "FaSta – Station Facilities Status" (and Timetables for as long as old app builds are around).
 
 ## App Attest
 
@@ -41,8 +47,8 @@ from BetterBahn on a real device (`../shared/appattest.mjs`, app side `WorkerAut
 
 Nothing is stored: challenges and tokens are HMAC-signed with `TOKEN_SECRET`. Rotating it makes
 every app attest a new key. Builds without App Attest (Simulator, Mac) get no token, so bahn.de,
-Timetables and Wallet don't work there unless `ALLOW_UNATTESTED` is set (Timetables never works
-without a token, since it spends the API key).
+OpenBoards, Timetables and Wallet don't work there unless `ALLOW_UNATTESTED` is set (OpenBoards and Timetables never work
+without a token, since they spend the API key).
 
 This is a separate Worker (`betterbahn2`) from the Träwelling callback (`../worker.mjs`), so abuse here can't
 affect login. It fits the free Workers plan (100,000 requests/day).
@@ -59,7 +65,7 @@ Secrets (the same `TOKEN_SECRET` in `../pass-signer`, e.g. from `openssl rand -b
 
 ```sh
 npx wrangler secret put TOKEN_SECRET
-npx wrangler secret put DB_CLIENT_ID   # DB API Marketplace, Timetables and FaSta
+npx wrangler secret put DB_CLIENT_ID   # DB API Marketplace, OpenBoards, FaSta (and Timetables)
 npx wrangler secret put DB_API_KEY
 ```
 
@@ -72,5 +78,5 @@ be rotated in the API Marketplace after the switch.
 
 Unit tests: `node --test Cloudflare/bahnde-proxy/worker.test.mjs Cloudflare/shared/appattest.test.mjs`.
 
-After deploying, `curl https://betterbahn2.betterbahn.workers.dev/health` answers `{"ok":true}`; Timetables
+After deploying, `curl https://betterbahn2.betterbahn.workers.dev/health` answers `{"ok":true}`; OpenBoards
 needs a token from the app (`-H 'X-BetterBahn-Token: …'`).

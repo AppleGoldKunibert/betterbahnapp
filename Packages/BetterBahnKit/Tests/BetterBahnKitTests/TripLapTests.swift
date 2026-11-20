@@ -4,7 +4,7 @@ import Testing
 
 /// Transitous' trip for the Ringbahn (S41/S42) is the vehicle's whole day: the S42 listed 490 stops from
 /// 03:51, every station 18 or 19 times. The departure board's "Gesundbrunnen 17:50" then showed the
-/// run "ab 3:50" (the first visit), and DB's Timetables was asked about every lap.
+/// run "ab 3:50" (the first visit), and DB's OpenBoards was asked about every lap.
 @Suite struct TripLapTests {
     // A shortened ring: Gesundbrunnen → Westhafen → Beusselstraße → Schönhauser Allee, every 10 minutes,
     // one lap an hour, four laps from 03:51 (2026-10-09 01:51 UTC).
