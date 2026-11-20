@@ -113,6 +113,8 @@ export async function arrivalView(arrival, expiresAt, deps = {}) {
 export async function liveTrain(arrival, deps) {
     let stops = arrival.stops;
     let live = false;
+    // DB's schedule knows the train, even when it reports no change yet (a train on time, or hours away).
+    let known = false;
     let messages = [];
     let fromIris = null;
     try {
@@ -122,6 +124,7 @@ export async function liveTrain(arrival, deps) {
     }
     if (fromIris) {
         stops = fromIris;
+        known = true;
         const destination = stops[stops.length - 1];
         live = destination.arrRt !== null || destination.cancelled;
     } else if (arrival.journeyId && deps.proxyURL && deps.secret) {
@@ -137,7 +140,7 @@ export async function liveTrain(arrival, deps) {
             // Our server or bahn.de down or refusing: the page shows the app's times until the next refresh.
         }
     }
-    return { stops, live, messages };
+    return { stops, live, known, messages };
 }
 
 /// The first stop the train hasn't left yet (the destination: not arrived at), by the best time known; -1 after
