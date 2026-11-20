@@ -67,7 +67,7 @@ export async function handleCommute(id, body, env, now, fetchUpstream) {
             legs.push({ ...leg, departure, arrival, state: {} });
         }
         if (legs.every(leg => leg.departure)) {
-            watched.push({ id: journey.id, threshold: journey.threshold, legs, transfers: before?.transfers ?? {} });
+            watched.push({ id: journey.id, threshold: journey.threshold, legs, transfers: keptTransfers(before, journey.legs) });
         }
     }
 
@@ -120,6 +120,19 @@ async function scheduled(iris, leg, stop, side) {
     } catch {
         return null;
     }
+}
+
+/// What was reported about the transfers of `before` that are still the same: a transfer (keyed by the index
+/// of the leg after it) counts only when the trains on both sides of it are unchanged, so a replanned journey
+/// with the same ID warns about its new transfers again (#570).
+function keptTransfers(before, legs) {
+    const transfers = {};
+    if (!before) return transfers;
+    const unchanged = (index) => before.legs[index] && legs[index] && sameLeg(before.legs[index], legs[index]);
+    for (const [index, level] of Object.entries(before.transfers ?? {})) {
+        if (unchanged(Number(index) - 1) && unchanged(Number(index))) transfers[index] = level;
+    }
+    return transfers;
 }
 
 function sameLeg(a, b) {
