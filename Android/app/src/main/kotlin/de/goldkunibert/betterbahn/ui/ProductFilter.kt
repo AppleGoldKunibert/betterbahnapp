@@ -2,6 +2,13 @@
 
 package de.goldkunibert.betterbahn.ui
 
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -43,9 +50,18 @@ fun ProductFilterSheet(
     ticket: TicketType? = null,
     onlyValidTicket: Boolean = false,
     onTicketChange: (Boolean) -> Unit = {},
+    /** With via stations: the parts of the route ("A → B"), each with products of its own once [perSection] is on. */
+    sections: List<String> = emptyList(),
+    perSection: Boolean = false,
+    onPerSection: (Boolean) -> Unit = {},
+    sectionProducts: (Int) -> Set<Product> = { Product.all },
+    onSectionChange: (Int, Set<Product>) -> Unit = { _, _ -> },
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 24.dp).navigationBarsPadding(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(
+            Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 24.dp).navigationBarsPadding(),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
             ticket?.let {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
@@ -56,6 +72,24 @@ fun ProductFilterSheet(
                 }
             }
             Text("Verkehrsmittel", style = MaterialTheme.typography.titleMedium)
+            if (sections.isNotEmpty()) {
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    listOf("Gesamte Reise" to false, "Pro Abschnitt" to true).forEachIndexed { index, (label, value) ->
+                        SegmentedButton(
+                            selected = perSection == value,
+                            onClick = { onPerSection(value) },
+                            shape = SegmentedButtonDefaults.itemShape(index, 2),
+                        ) { Text(label) }
+                    }
+                }
+            }
+            if (sections.isNotEmpty() && perSection) {
+                sections.forEachIndexed { index, title ->
+                    Text(title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                    ProductChips(Product.entries, sectionProducts(index)) { onSectionChange(index, it) }
+                }
+                return@Column
+            }
             FlowRow(horizontalArrangement = Arrangement.spacedBy(ChipSpacing)) {
                 FilterChip(products == Product.trains, onClick = { onChange(Product.trains) }, label = { Text("Nur Züge") })
                 FilterChip(products == Product.longDistance, onClick = { onChange(Product.longDistance) }, label = { Text("Nur Fernverkehr") })
@@ -73,7 +107,7 @@ fun ProductFilterSheet(
 }
 
 @Composable
-private fun ProductChips(shown: List<Product>, products: Set<Product>, onChange: (Set<Product>) -> Unit) {
+fun ProductChips(shown: List<Product>, products: Set<Product>, onChange: (Set<Product>) -> Unit) {
     FlowRow(horizontalArrangement = Arrangement.spacedBy(ChipSpacing)) {
         for (product in shown) {
             val selected = product in products

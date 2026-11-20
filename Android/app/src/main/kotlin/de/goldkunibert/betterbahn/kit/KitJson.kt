@@ -34,6 +34,15 @@ object KitJson {
             it.raw = element.jsonObject.getValue("journey").jsonObject
         }
 
+    fun journeys(element: JsonElement): List<JourneyDisplay> = element.jsonArray.map(::journey)
+
+    fun trainCandidates(element: JsonElement): List<TrainCandidate> =
+        element.jsonArray.map { item ->
+            json.decodeFromJsonElement<TrainCandidate>(item).also {
+                it.requirement = item.jsonObject["requirement"] as? kotlinx.serialization.json.JsonObject
+            }
+        }
+
     fun trip(element: JsonElement): TripDisplay =
         json.decodeFromJsonElement<TripDisplay>(element).also {
             it.raw = element.jsonObject.getValue("trip").jsonObject

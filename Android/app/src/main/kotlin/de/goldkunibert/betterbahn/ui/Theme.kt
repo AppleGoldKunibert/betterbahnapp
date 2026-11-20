@@ -6,6 +6,7 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import de.goldkunibert.betterbahn.data.AppDesign
 import de.goldkunibert.betterbahn.kit.LineDisplay
 import de.goldkunibert.betterbahn.kit.Product
 
@@ -49,9 +50,16 @@ private val DarkColors = darkColorScheme(
     surfaceVariant = Color(0xFF2C2C2E),
 )
 
+/** The app's colours; Fahrkarte puts every screen on its warm page (`AppBackground`). */
 @Composable
-fun BetterBahnTheme(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = if (isSystemInDarkTheme()) DarkColors else LightColors, content = content)
+fun BetterBahnTheme(design: AppDesign = AppDesign.Minimal, content: @Composable () -> Unit) {
+    val dark = isSystemInDarkTheme()
+    var colors = if (dark) DarkColors else LightColors
+    if (design == AppDesign.Fahrkarte) {
+        val canvas = if (dark) Color(0xFF0D0D0F) else Color(0xFFF5F4F1)
+        colors = colors.copy(background = canvas, surface = canvas, surfaceContainer = canvas)
+    }
+    MaterialTheme(colorScheme = colors, content = content)
 }
 
 /** Delay colour: green up to 5 minutes late, orange up to 10, red beyond (`delayColor`). */

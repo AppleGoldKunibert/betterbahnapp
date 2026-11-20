@@ -94,6 +94,7 @@ object Kit {
         maxTransfers: Int? = null,
         via: List<Station> = emptyList(),
         ticket: TicketType? = null,
+        viaOptions: List<de.goldkunibert.betterbahn.data.ViaOptions> = emptyList(),
     ): JourneysPage {
         val result = call("journeys", buildJsonObject {
             put("from", json.encodeToJsonElement(from))
@@ -105,10 +106,13 @@ object Kit {
             maxTransfers?.let { put("maxTransfers", it) }
             ticket?.let { put("ticket", it.id) }
             if (via.isNotEmpty()) {
-                put("via", JsonArray(via.map { station ->
+                put("via", JsonArray(via.mapIndexed { index, station ->
+                    val options = viaOptions.getOrNull(index)
                     buildJsonObject {
                         put("station", json.encodeToJsonElement(station))
-                        put("minStayMinutes", 0)
+                        put("minStayMinutes", options?.minStayMinutes ?: 0)
+                        options?.products?.let { set -> put("products", json.encodeToJsonElement(set.map { it.id })) }
+                        put("hasProductGroups", true)
                     }
                 }))
             }
@@ -224,6 +228,65 @@ object Kit {
     /** A connection shared from DB Navigator, found again. */
     suspend fun importShared(text: String): JourneyDisplay =
         KitJson.journey(call("importShared", buildJsonObject { put("text", text) }))
+
+    // MARK: Connection search
+
+    /** Where a saved journey stands at [now]; null once it has arrived. */
+    suspend fun liveStatus(raw: JsonObject, now: Long = System.currentTimeMillis()): LiveStatus? {
+        val result = call("liveStatus", buildJsonObject { put("journey", raw); put("now", now) })
+        return if (result is kotlinx.serialization.json.JsonNull) null else json.decodeFromJsonElement(result)
+    }
+
+    /** The series of each leg's train ("ICE 3"), else its line. */
+    suspend fun trainSeries(rawLegs: List<JsonObject>): List<String> =
+        json.decodeFromJsonElement(call("trainSeries", buildJsonObject { put("legs", JsonArray(rawLegs)) }))
+
+    /**
+     * The results once more, as iOS does after showing them: detours gone, missing platforms filled in, late train
+     * names taken.
+     */
+    suspend fun refineJourneys(
+        raws: List<JsonObject>, from: Station, to: Station, start: Long, end: Long, isVia: Boolean, ticket: TicketType?,
+    ): List<JourneyDisplay> = KitJson.journeys(call("refineJourneys", buildJsonObject {
+        put("journeys", JsonArray(raws))
+        put("from", json.encodeToJsonElement(from))
+        put("to", json.encodeToJsonElement(to))
+        put("start", start)
+        put("end", end)
+        put("isVia", isVia)
+        ticket?.let { put("ticket", it.id) }
+    }))
+
+    /** A result's live times as it shows; null when live data can't change it. */
+    suspend fun checkLive(raw: JsonObject): JourneyDisplay? {
+        val result = call("checkLive", journeyArgs(raw))
+        return if (result is kotlinx.serialization.json.JsonNull) null else KitJson.journey(result)
+    }
+
+    /** Trains fitting [text] on the boards of [stations] (where they could be boarded) around [date]. */
+    suspend fun trainCandidates(text: String, stations: List<Station>, target: Station, date: Long): List<TrainCandidate> =
+        KitJson.trainCandidates(call("trainCandidates", buildJsonObject {
+            put("text", text)
+            put("stations", json.encodeToJsonElement(stations))
+            put("target", json.encodeToJsonElement(target))
+            put("date", date)
+        }))
+
+    /** Routes riding every picked train ([TrainCandidate.requirement]). */
+    suspend fun planTrainRoute(requirements: List<JsonObject>, from: Station, to: Station, date: Long, ticket: TicketType?): TrainRoutePlan {
+        val answer = call("planTrainRoute", buildJsonObject {
+            put("requirements", JsonArray(requirements))
+            put("from", json.encodeToJsonElement(from))
+            put("to", json.encodeToJsonElement(to))
+            put("date", date)
+            ticket?.let { put("ticket", it.id) }
+        }).jsonObject
+        return TrainRoutePlan(
+            KitJson.journeys(answer.getValue("journeys")),
+            json.decodeFromJsonElement(answer.getValue("resolvedNames")),
+            json.decodeFromJsonElement(answer.getValue("breaksBoardingRules")),
+        )
+    }
 
     private fun journeyArgs(raw: JsonObject) = buildJsonObject { put("journey", raw) }
 

@@ -2,6 +2,13 @@
 
 package de.goldkunibert.betterbahn.ui.settings
 
+import de.goldkunibert.betterbahn.data.BikeOption
+import de.goldkunibert.betterbahn.data.AppDesign
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.Alignment
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.Switch
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -33,8 +40,14 @@ fun SettingsScreen(model: AppModel) {
     val context = LocalContext.current
     val version = context.packageManager.getPackageInfo(context.packageName, 0).versionName
     val ticket by model.store.ticketType.collectAsState()
+    val settings = model.store.settings
+    val design by settings.design.state.collectAsState()
+    val bike by settings.bikeOption.state.collectAsState()
+    val ticketFilterByDefault by settings.ticketFilterByDefault.state.collectAsState()
+    val expert by settings.expertMode.state.collectAsState()
+    val trainChoice by settings.expertTrainChoice.state.collectAsState()
     Column(Modifier.fillMaxSize()) {
-        TopAppBar(title = { Text("Mehr") })
+        TopAppBar(title = { Text("Mehr") }, colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent))
         Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Card {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -56,6 +69,40 @@ fun SettingsScreen(model: AppModel) {
                             ) { Text(type.displayName) }
                         }
                     }
+                    SwitchRow("Nur passende Züge zeigen", "Die Suche startet mit „${ticket.filterTitle}“.", ticketFilterByDefault) {
+                        settings.ticketFilterByDefault.set(it)
+                    }
+                }
+            }
+            Card {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Design", style = MaterialTheme.typography.titleMedium)
+                    Choice(AppDesign.entries, design, { it.displayName }) { settings.design.set(it) }
+                    Text(
+                        if (design == AppDesign.Fahrkarte) "Die Suche als Fahrkarte, flache Karten auf warmem Grund." else "Ruhige Karten, selten geänderte Optionen eingeklappt.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            Card {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Fahrrad", style = MaterialTheme.typography.titleMedium)
+                    Choice(BikeOption.entries, bike, { it.displayName }) { settings.bikeOption.set(it) }
+                    Text(
+                        if (bike == BikeOption.Hidden) "Mit Klapprad oder Fahrrad zeigt die Suche, wo es mitkommt und ob du eine Reservierung oder Fahrradkarte brauchst."
+                        else "In der Suche schaltest du ein, ob es diesmal mitkommt.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            Card {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SwitchRow("Expertenmodus", null, expert) { settings.expertMode.set(it) }
+                    if (expert) {
+                        SwitchRow("Bestimmten Zug wählen", "Einen bestimmten Zug in die Reise übernehmen.", trainChoice) {
+                            settings.expertTrainChoice.set(it)
+                        }
+                    }
                 }
             }
             Card {
@@ -65,6 +112,32 @@ fun SettingsScreen(model: AppModel) {
                 }
             }
             OutlinedButton(onClick = { model.store.clearHistory() }) { Text("Suchverlauf löschen") }
+        }
+    }
+}
+
+/** A title, an optional note and a switch. */
+@Composable
+fun SwitchRow(title: String, subtitle: String?, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title)
+            subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        }
+        Switch(checked = checked, onCheckedChange = onChange)
+    }
+}
+
+/** One of a few options as segmented buttons. */
+@Composable
+fun <T> Choice(options: List<T>, selected: T, label: (T) -> String, onSelect: (T) -> Unit) {
+    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+        options.forEachIndexed { index, option ->
+            SegmentedButton(
+                selected = option == selected,
+                onClick = { onSelect(option) },
+                shape = SegmentedButtonDefaults.itemShape(index, options.size),
+            ) { Text(label(option), maxLines = 1) }
         }
     }
 }

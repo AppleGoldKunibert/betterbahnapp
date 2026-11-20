@@ -2,6 +2,9 @@
 
 package de.goldkunibert.betterbahn.ui
 
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
@@ -51,10 +54,38 @@ private fun status(display: JourneyDisplay): CardStatus? {
     }
 }
 
-/** A connection in a list: times, duration, the trains, transfers, first platform and what's wrong. */
+/**
+ * A connection in a list (`JourneyCard`). Minimal: a card with the times, the trains and what needs attention.
+ * Fahrkarte: a small ticket, "Abfahrt"/"Ankunft" above the perforation, the trains and notes below it.
+ */
 @Composable
 fun JourneyCard(display: JourneyDisplay, modifier: Modifier = Modifier, highlight: Color? = null, onClick: () -> Unit) {
     val journey = display.journey
+    if (isFahrkarte) {
+        val outline = highlight?.let { Modifier.border(2.dp, it, RoundedCornerShape(22.dp)) } ?: Modifier
+        Ticket(modifier.then(outline).clickable(onClick = onClick), sections = listOf(
+            {
+                Row(Modifier.padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.Bottom) {
+                    Column {
+                        TicketCaption("Abfahrt")
+                        journey.departure?.let { TimeStack(it, cancelled = display.isCancelled) }
+                    }
+                    Column(Modifier.weight(1f).padding(horizontal = 10.dp, vertical = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        display.durationSeconds?.let {
+                            Text(compactDuration(it), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Text(transfersText(display.transfers), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Column(horizontalAlignment = Alignment.End) {
+                        TicketCaption("Ankunft")
+                        journey.arrival?.let { TimeStack(it, cancelled = display.isCancelled, alignEnd = true) }
+                    }
+                }
+            },
+            { Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { Details(display, showTransfers = false) } },
+        ))
+        return
+    }
     Card(onClick = onClick, modifier = modifier.fillMaxWidth(), border = highlight?.let { BorderStroke(2.dp, it) }) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.Top) {
@@ -67,34 +98,42 @@ fun JourneyCard(display: JourneyDisplay, modifier: Modifier = Modifier, highligh
                 }
                 journey.arrival?.let { TimeStack(it, cancelled = display.isCancelled, alignEnd = true) }
             }
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                val transit = journey.legs.indices.filter { !journey.legs[it].isWalking }
-                transit.forEachIndexed { position, index ->
-                    if (position > 0) {
-                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, Modifier.size(18.dp).align(Alignment.CenterVertically), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    LineBadge(display.legs[index].line, small = true, modifier = Modifier.align(Alignment.CenterVertically))
-                }
+            Details(display, showTransfers = true)
+        }
+    }
+}
+
+/** The trains, transfers, the first platform and what's wrong, below the times. */
+@Composable
+private fun Details(display: JourneyDisplay, showTransfers: Boolean) {
+    val journey = display.journey
+    if (isFahrkarte) SegmentBar(display, Modifier.fillMaxWidth().height(6.dp))
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        val transit = journey.legs.indices.filter { !journey.legs[it].isWalking }
+        transit.forEachIndexed { position, index ->
+            if (position > 0) {
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, Modifier.size(18.dp).align(Alignment.CenterVertically), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(transfersText(display.transfers), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                journey.transitLegs.firstOrNull()?.departurePlatform?.let { platform ->
-                    platform.best?.let {
-                        Text(
-                            "Gleis $it",
-                            style = MaterialTheme.typography.bodySmall,
-                            fontWeight = if (platform.hasChanged) FontWeight.Bold else null,
-                            color = if (platform.hasChanged) HeavyDelay else MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-                Row(Modifier.weight(1f), horizontalArrangement = Arrangement.End) {
-                    when (val status = status(display)) {
-                        is CardStatus.Label -> Text(status.text, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = status.color)
-                        is CardStatus.Warning -> Icon(Icons.Filled.Warning, "Hinweise", Modifier.size(18.dp), tint = status.color)
-                        null -> {}
-                    }
-                }
+            LineBadge(display.legs[index].line, small = true, modifier = Modifier.align(Alignment.CenterVertically))
+        }
+    }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        if (showTransfers) Text(transfersText(display.transfers), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        journey.transitLegs.firstOrNull()?.departurePlatform?.let { platform ->
+            platform.best?.let {
+                Text(
+                    "Gleis $it",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = if (platform.hasChanged) FontWeight.Bold else null,
+                    color = if (platform.hasChanged) HeavyDelay else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.End) {
+            when (val status = status(display)) {
+                is CardStatus.Label -> Text(status.text, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = status.color)
+                is CardStatus.Warning -> Icon(Icons.Filled.Warning, "Hinweise", Modifier.size(18.dp), tint = status.color)
+                null -> {}
             }
         }
     }

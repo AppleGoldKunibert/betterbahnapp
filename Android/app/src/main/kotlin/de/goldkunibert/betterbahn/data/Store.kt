@@ -12,7 +12,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonObject
 
-/** A connection search (`ConnectionSearch` on iOS, without tickets and bikes so far). */
+/** A connection search (`ConnectionSearch` on iOS). */
 @Serializable
 data class ConnectionSearch(
     val from: Station,
@@ -26,7 +26,15 @@ data class ConnectionSearch(
     val maxTransfers: Int? = null,
     /** Only connections the ticket from the settings covers. */
     val onlyValidTicket: Boolean = false,
+    /** Per via station (same order as [via]): the minimum stay there and the products for the part from it. */
+    val viaOptions: List<ViaOptions> = emptyList(),
+    /** "Mit Fahrrad" was on. */
+    val withBike: Boolean = false,
 )
+
+/** What a via station adds (`ViaWaypoint`): at least this long there, and the products from it (null: the search's). */
+@Serializable
+data class ViaOptions(val minStayMinutes: Int = 0, val products: Set<Product>? = null)
 
 @Serializable
 data class RecentSearch(val from: Station, val to: Station)
@@ -69,6 +77,9 @@ class Store private constructor(context: Context) {
 
     private val _recentSearches = MutableStateFlow(load("recentSearches", RecentSearch.serializer()))
     val recentSearches: StateFlow<List<RecentSearch>> = _recentSearches
+
+    /** Design, bike, the ticket filter's default, the expert options. */
+    val settings = Settings(prefs)
 
     private val _ticketType = MutableStateFlow(TicketType.of(prefs.getString("ticketType", null)))
     /** The ticket for "Nur Deutschlandticket" & Co. (Einstellungen). */

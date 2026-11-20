@@ -1,5 +1,9 @@
 package de.goldkunibert.betterbahn
 
+import de.goldkunibert.betterbahn.ui.ProvideAppDesign
+import de.goldkunibert.betterbahn.ui.pageColor
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
 import android.Manifest
 import android.content.Intent
 import android.os.Build
@@ -68,7 +72,8 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         if (savedInstanceState == null) handleShare(intent)
         setContent {
-            BetterBahnTheme { App(model) }
+            val design by model.store.settings.design.state.collectAsState()
+            BetterBahnTheme(design) { ProvideAppDesign(design) { App(model) } }
             if (model.wantsNotificationPermission) {
                 LaunchedEffect(Unit) {
                     model.wantsNotificationPermission = false
@@ -129,7 +134,7 @@ fun App(model: AppModel) {
         )
     }
 
-    Scaffold(bottomBar = {
+    Scaffold(containerColor = pageColor, bottomBar = {
         NavigationBar {
             for (tab in Tab.entries) {
                 NavigationBarItem(

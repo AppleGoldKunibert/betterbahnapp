@@ -3,6 +3,7 @@ package de.goldkunibert.betterbahn.kit
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -82,5 +83,23 @@ class KitJsonTest {
         val time = TimeInfo(planned = 0, actual = 4 * 60_000 + 40_000)
         assertEquals(5, time.delayMinutes)
         assertEquals("""{"planned":1.5}""".let { KitJson.json.decodeFromString<TimeInfo>(it).planned }, 1L)
+    }
+
+    /** A train candidate keeps its requirement to hand back; the live status reads as the bridge writes it. */
+    @Test
+    fun trainCandidatesAndLiveStatus() {
+        val answer = """{"ok":[{"id":"t|3","name":"ICE 91","isExact":true,"requirement":{"id":"6F9619FF-8B86-D011-B42D-00C04FC964FF","trainName":"ICE 91"}},
+            {"id":"u|-1","name":"RE 3","isExact":false}]}"""
+        val candidates = KitJson.trainCandidates(KitJson.parseAnswer(answer))
+        assertEquals(2, candidates.size)
+        assertEquals("ICE 91", candidates[0].requirement?.get("trainName")?.jsonPrimitive?.content)
+        assertEquals(null, candidates[1].requirement)
+
+        val status = KitJson.json.decodeFromJsonElement<LiveStatus>(KitJson.parseAnswer(
+            """{"ok":{"step":"riding","legIndex":1,"nextTransfer":{"nextIndex":3,"minutes":7,"waiting":false,"isMissed":false},"upcomingIndices":[1,3]}}""",
+        ))
+        assertEquals("riding", status.step)
+        assertEquals(7, status.nextTransfer?.minutes)
+        assertEquals(listOf(1, 3), status.upcomingIndices)
     }
 }

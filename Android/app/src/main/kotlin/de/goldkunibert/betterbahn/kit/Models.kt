@@ -168,6 +168,8 @@ data class JourneyDisplay(
     val issues: List<Issue> = emptyList(),
     /** With a ticket filter: whether the ticket covers it. */
     val validWithTicket: Boolean? = null,
+    /** With a ticket filter: every leg runs abroad, so the ticket covers none of it. */
+    val entirelyAbroad: Boolean? = null,
 ) {
     /** The journey's Kit JSON, to hand back (save, refresh, open a leg's train). */
     @Transient
@@ -382,4 +384,49 @@ data class Coach(
     val bikeSpaces: Int? = null,
     val group: Int = 0,
     val isPassengerCoach: Boolean = true,
+)
+
+/** Where a saved journey stands now (`JourneyLiveStatus`), as indices into its legs. */
+@Serializable
+data class LiveStatus(
+    /** "departure", "riding" or "transfer". */
+    val step: String,
+    val legIndex: Int,
+    val previousIndex: Int? = null,
+    val nextTransfer: LiveTransfer? = null,
+    val upcomingIndices: List<Int> = emptyList(),
+)
+
+/** The change after the train being ridden, from 10 minutes before it arrives. */
+@Serializable
+data class LiveTransfer(
+    val nextIndex: Int,
+    val minutes: Int,
+    val waiting: Boolean = false,
+    val waitingTitle: String? = null,
+    val isMissed: Boolean = false,
+)
+
+/** A train fitting what was typed in "Bestimmter Zug" (`TrainCandidate`). */
+@Serializable
+data class TrainCandidate(
+    val id: String,
+    val line: LineDisplay? = null,
+    val name: String,
+    val direction: String? = null,
+    val boarding: Stopover? = null,
+    val exit: Stopover? = null,
+    val isExact: Boolean = false,
+) {
+    /** The Kit's `TrainRequirement` for this train, handed back to plan the route; null without a boarding stop. */
+    @Transient
+    var requirement: JsonObject? = null
+}
+
+/** Routes riding every picked train (`TrainRoutePlan`). */
+data class TrainRoutePlan(
+    val journeys: List<JourneyDisplay>,
+    /** Per requirement id, the name as the provider spells it. */
+    val resolvedNames: Map<String, String>,
+    val breaksBoardingRules: Boolean,
 )

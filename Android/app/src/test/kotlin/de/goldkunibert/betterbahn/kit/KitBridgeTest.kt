@@ -61,6 +61,45 @@ class KitBridgeTest {
         assertTrue(described.flatMap { it.journey.legs }.any { it.destination.displayName == "München Hbf" })
     }
 
+    /** Where a saved journey stands: before its first train, on it, between trains, and nothing once arrived. */
+    @Test
+    fun liveStatusFollowsTheJourney() {
+        assumeTrue(folder != null)
+        val raw = recordedJourneys().first()
+        val journey = KitJson.json.decodeFromJsonElement(Journey.serializer(), raw)
+        val transit = journey.legs.indices.filter { !journey.legs[it].isWalking }
+        fun status(now: Long) = call("liveStatus", buildJsonObject { put("journey", raw); put("now", now) })
+            .let { if (it is kotlinx.serialization.json.JsonNull) null else KitJson.json.decodeFromJsonElement(LiveStatus.serializer(), it) }
+
+        val first = journey.legs[transit.first()]
+        val before = status(first.departure.best - 30 * 60_000)!!
+        assertEquals("departure", before.step)
+        assertEquals(transit.first(), before.legIndex)
+        assertEquals(transit, before.upcomingIndices)
+
+        val riding = status(first.departure.best + 60_000)!!
+        assertEquals("riding", riding.step)
+        if (transit.size > 1) {
+            // From 10 minutes before the arrival the change after it shows.
+            val soon = status(first.arrival.best - 5 * 60_000)!!
+            assertEquals(transit[1], soon.nextTransfer?.nextIndex)
+            val between = status(first.arrival.best + 30_000)
+            if (between != null && journey.legs[transit[1]].departure.best > first.arrival.best + 30_000) {
+                assertEquals("transfer", between.step)
+                assertEquals(transit.first(), between.previousIndex)
+            }
+        }
+        assertEquals(null, status(journey.legs.last().arrival.best + 60_000))
+    }
+
+    /** A result long over isn't checked live: nothing could change it. */
+    @Test
+    fun noLiveCheckForPastJourneys() {
+        assumeTrue(folder != null)
+        val answer = call("checkLive", buildJsonObject { put("journey", recordedJourneys().first()) })
+        assertTrue(answer is kotlinx.serialization.json.JsonNull)
+    }
+
     @Test
     fun keepsTheWorkerToken() {
         assumeTrue(folder != null)

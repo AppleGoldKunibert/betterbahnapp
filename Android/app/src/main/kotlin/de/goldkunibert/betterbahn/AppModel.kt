@@ -9,6 +9,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import de.goldkunibert.betterbahn.data.ConnectionSearch
+import de.goldkunibert.betterbahn.data.ViaOptions
 import de.goldkunibert.betterbahn.data.Notifier
 import de.goldkunibert.betterbahn.data.SavedRefresh
 import de.goldkunibert.betterbahn.widget.JourneyWidget
@@ -54,16 +55,47 @@ data class SearchForm(
     val from: Station? = null,
     val to: Station? = null,
     val via: List<Station> = emptyList(),
+    /** Per via station, the minimum stay there in minutes ("Mindestaufenthalt"). */
+    val viaStays: List<Int> = emptyList(),
     val date: Long? = null,
     val isArrival: Boolean = false,
     val products: Set<Product> = Product.all,
+    /** "Pro Abschnitt": products per part of the route, the part from the start first ([legProducts]). */
+    val productsPerLeg: Boolean = false,
+    val legProducts: List<Set<Product>> = emptyList(),
     val maxTransfers: Int? = null,
     val onlyValidTicket: Boolean = false,
 ) {
-    fun search(): ConnectionSearch? {
+    /** Per-part selection only makes sense once there is more than one part. */
+    val perLeg: Boolean get() = productsPerLeg && via.isNotEmpty()
+
+    fun stay(index: Int): Int = viaStays.getOrNull(index) ?: 0
+    fun legProducts(index: Int): Set<Product> = legProducts.getOrNull(index) ?: Product.all
+
+    val hasEmptyProductSelection: Boolean
+        get() = if (perLeg) (0..via.size).any { legProducts(it).isEmpty() } else products.isEmpty()
+
+    fun withVia(via: List<Station>, stays: List<Int>, legs: List<Set<Product>>) =
+        copy(via = via, viaStays = stays, legProducts = legs)
+
+    /** Without the via station at [index], its stay and the part starting there. */
+    fun removingVia(index: Int) = withVia(
+        via.filterIndexed { i, _ -> i != index },
+        via.indices.map(::stay).filterIndexed { i, _ -> i != index },
+        (0..via.size).map(::legProducts).filterIndexed { i, _ -> i != index + 1 },
+    )
+
+    fun search(withBike: Boolean = false): ConnectionSearch? {
         val from = from ?: return null
         val to = to ?: return null
-        return ConnectionSearch(from, to, via, date, isArrival && via.isEmpty(), products, maxTransfers, onlyValidTicket)
+        return ConnectionSearch(
+            from, to, via, date, isArrival && via.isEmpty(),
+            products = if (perLeg) legProducts(0) else products,
+            maxTransfers = maxTransfers,
+            onlyValidTicket = onlyValidTicket,
+            viaOptions = via.indices.map { ViaOptions(stay(it), if (perLeg) legProducts(it + 1) else null) },
+            withBike = withBike,
+        )
     }
 }
 
@@ -72,7 +104,7 @@ class AppModel(application: Application) : AndroidViewModel(application) {
     val store = Store.get(application)
 
     var tab by mutableStateOf(Tab.Connections)
-    var form by mutableStateOf(SearchForm())
+    var form by mutableStateOf(SearchForm(onlyValidTicket = store.settings.ticketFilterByDefault.value))
     val board = BoardState()
     private val stacks = Tab.entries.associateWith { mutableStateListOf<Route>() }
 
