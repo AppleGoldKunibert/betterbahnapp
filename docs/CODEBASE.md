@@ -631,7 +631,7 @@ in `project.pbxproj`: new files join their target automatically.
   → `WalletPassError.unverifiedBarcode`), `TravelPass` (Zeitkarte, only barcode bytes kept, `passes.json`). No direct
   order API client: bahn.de blocks it outside its page.
 - `Tickets/PassengerRights.swift` (#311) – `PassengerRights.claim(for:earlierPlans:hasTicket:hasBahnCard100:)`: delay
-  at the destination against the first booked plan (`previousVersions`), 25 % from 60 min, 50 % from 120; only with a
+  at the last train's arrival (a final walk has no live times, #565) against the first booked plan (`previousVersions`), 25 % from 60 min, 50 % from 120; only with a
   ticket, BahnCard 100 or a long-distance train; `requestFields` for DB's form (day, departure and trains of the
   booked plan, `bookedPlan`; after a replan also "Gefahrene Züge").
 - `Sharing/` – `JourneyShareLink` (encoding, payload limits, short IDs; the shared copy, `Journey.forSharing`, gets every station's EVA number from `StationNames` (the share page's live times ask IRIS by it) and DB's names (`Station.displayName`, also for the direction)), `ShortShareLinkClient` (long link as
