@@ -254,4 +254,66 @@ extension BahnDeClient {
         return SharedConnection(origin: first.origin, destination: last.destination, departure: first.departure,
                                 arrival: last.arrival, legs: legs, firstTrain: first.trainName, lastTrain: last.trainName)
     }
+
+    /// A shared train from bahn.de's own timetable, for when the app's timetable data lacks it (e.g. the first
+    /// days of a new timetable year, before DELFI publishes it): found on the departure board where it's
+    /// boarded at its planned time, with its stops up to where it's left from bahn.de's journey details.
+    /// `nil` when bahn.de doesn't list it there (its board is one page from that minute on, which at a hub is
+    /// still a few minutes' worth, enough for a train leaving at exactly that time).
+    func sharedLeg(_ shared: SharedConnection.Leg) async throws -> Leg? {
+        guard let eva = try await evaNumber(for: shared.origin) else { return nil }
+        let board = try await get(Self.boardURL(eva: eva, at: shared.departure, products: []), as: Board.self)
+        guard let entry = Self.boardEntry(in: board, for: shared) else { return nil }
+        let details = try await get(Self.journeyURL(entry.journeyId), as: JourneyDetails.self)
+        return Self.leg(shared, entry: entry, details: details)
+    }
+
+    /// The board entry leaving at `shared`'s planned time under its name, or its number (a bare "89687" for
+    /// a regional train, bahn.de's own number in the journey ID).
+    static func boardEntry(in board: Board, for shared: SharedConnection.Leg) -> Board.Entry? {
+        let target = normalizedTrainName(shared.trainName)
+        let number = trainNumber(in: shared.trainName)
+        return board.entries.first { entry in
+            guard let time = entry.zeit.flatMap(parseBerlinTime), abs(time.timeIntervalSince(shared.departure)) < 60 else { return false }
+            let names = [entry.verkehrmittel?.name, entry.verkehrmittel?.mittelText].compactMap { $0 }
+            if names.contains(where: { normalizedTrainName($0) == target }) { return true }
+            guard let number else { return false }
+            return journeyNumber(in: entry.journeyId) == number || names.contains { trainNumber(in: $0) == number }
+        }
+    }
+
+    /// `shared` as a leg of the train bahn.de's journey details describe: its stops from where it's boarded
+    /// to where it's left (by planned time and place), with their platforms. Without a trip ID, as no
+    /// timetable feed knows the train; the saved journey's refresh asks DB Timetables and bahn.de instead.
+    static func leg(_ shared: SharedConnection.Leg, entry: Board.Entry, details: JourneyDetails) -> Leg? {
+        let stops = details.halte.compactMap(JourneyStop.init)
+        func at(_ time: TimeInfo?, _ planned: Date) -> Bool { time.map { abs($0.planned.timeIntervalSince(planned)) < 60 } == true }
+        guard let start = stops.firstIndex(where: { at($0.departure, shared.departure) && isNear($0, shared.origin) }),
+              let end = stops.indices.first(where: { $0 > start && at(stops[$0].arrival, shared.arrival) && isNear(stops[$0], shared.destination) })
+        else { return nil }
+        let stopovers = stops[start...end].map { stop in
+            Stopover(station: Station(id: stop.evaNumber, name: stop.name, coordinate: stop.coordinate,
+                                      evaNumber: stop.evaNumber, source: .bahnDe),
+                     arrival: stop.arrival, departure: stop.departure,
+                     arrivalPlatform: stop.arrivalPlatform, departurePlatform: stop.departurePlatform,
+                     cancelled: stop.isCancelled, isAdditional: stop.isAdditional)
+        }
+        let first = stops[start], last = stops[end]
+        var line = DBShareImporter.line(named: shared.trainName, gattung: entry.verkehrmittel?.produktGattung)
+        line.tripNumber = journeyNumber(in: entry.journeyId)
+        var origin = shared.origin, destination = shared.destination
+        origin.coordinate = origin.coordinate ?? first.coordinate
+        destination.coordinate = destination.coordinate ?? last.coordinate
+        var leg = Leg(origin: origin, destination: destination,
+                      departure: first.departure ?? TimeInfo(planned: shared.departure, actual: nil),
+                      arrival: last.arrival ?? TimeInfo(planned: shared.arrival, actual: nil),
+                      departurePlatform: first.departurePlatform, arrivalPlatform: last.arrivalPlatform,
+                      tripId: nil, line: line, direction: entry.terminus, isWalking: false,
+                      cancelled: first.isCancelled || last.isCancelled,
+                      stopovers: stopovers, remarks: [], source: .bahnDe)
+        // The railway running the part ridden (RJ 179: DB to Bad Schandau, ČD on to Praha).
+        let riding = operators(operators(of: details), riding: leg, stops: stops)
+        if riding.count == 1 { leg.line?.operatorName = riding[0].name }
+        return leg
+    }
 }

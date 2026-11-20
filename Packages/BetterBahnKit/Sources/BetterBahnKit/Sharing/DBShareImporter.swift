@@ -46,7 +46,16 @@ public struct DBShareImporter: Sendable {
         let shared = await locatingStations(of: connection)
 
         if let journey = try? await searched(shared) { return journey }
-        if !shared.legs.isEmpty, let journey = try? await rebuilt(shared) { return journey }
+        if !shared.legs.isEmpty {
+            do {
+                if let journey = try await rebuilt(shared) { return journey }
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                // No answer at all (offline, a server down): worth trying again rather than "not found".
+                throw DBShareError.unreadable
+            }
+        }
         throw DBShareError.notFound
     }
 
@@ -82,15 +91,82 @@ public struct DBShareImporter: Sendable {
     // MARK: - Leg by leg
 
     /// Looks up every shared train on its own – for when the search prefers other routes (or splits
-    /// a ride differently) and never returns the shared one.
+    /// a ride differently) and never returns the shared one. A train the timetable data lacks (e.g. on the
+    /// first days of a new timetable year, which DELFI publishes late) comes from bahn.de's own timetable,
+    /// or else just as the share describes it, so the journey can still be saved.
     private func rebuilt(_ shared: SharedConnection) async throws -> Journey? {
         var legs: [Leg] = []
         for sharedLeg in shared.legs {
-            guard let leg = try await leg(for: sharedLeg) else { return nil }
-            legs.append(leg)
+            if let leg = try await Self.unlessUnknown({ try await self.leg(for: sharedLeg) }) {
+                legs.append(leg)
+            } else if let leg = try await Self.unlessUnknown({ try await bahnDe.sharedLeg(sharedLeg) }) {
+                legs.append(leg)
+            } else if let leg = Self.plainLeg(sharedLeg) {
+                legs.append(leg)
+            } else {
+                return nil
+            }
         }
         guard let first = legs.first else { return nil }
         return Journey(legs: legs, source: first.source)
+    }
+
+    /// `work`'s answer, or nil when it failed because the train or station isn't known there. Getting no answer
+    /// at all (offline, a timeout, a server down or blocking, the import cancelled) is thrown instead: a train
+    /// the timetable data does know mustn't be saved in a poorer version just because it didn't answer in time.
+    static func unlessUnknown<T>(_ work: () async throws -> T?) async throws -> T? {
+        do {
+            return try await work()
+        } catch where isUnavailable(error) {
+            throw error
+        } catch {
+            return nil
+        }
+    }
+
+    static func isUnavailable(_ error: Error) -> Bool {
+        if error is CancellationError || error is URLError { return true }
+        guard let error = error as? TransitError else { return false }
+        switch error {
+        case .timeout, .rateLimited, .unauthorized: return true
+        case .http(let status, _): return error.isBlocked || status == 401 || status == 429 || status >= 500
+        case .decoding, .notFound, .invalidInput: return false
+        }
+    }
+
+    /// `shared` with just what the share says: its two ends and planned times. Only for stations that
+    /// were found (coordinates), so a misread name doesn't end up in a saved journey.
+    static func plainLeg(_ shared: SharedConnection.Leg) -> Leg? {
+        guard shared.origin.coordinate != nil, shared.destination.coordinate != nil,
+              shared.departure < shared.arrival else { return nil }
+        return Leg(origin: shared.origin, destination: shared.destination,
+                   departure: TimeInfo(planned: shared.departure, actual: nil),
+                   arrival: TimeInfo(planned: shared.arrival, actual: nil),
+                   departurePlatform: nil, arrivalPlatform: nil, tripId: nil, line: line(named: shared.trainName),
+                   direction: nil, isWalking: false, cancelled: false, stopovers: [], remarks: [], source: .bahnDe)
+    }
+
+    /// A line for a train known only by DB's name for it ("RJ 179", "R 1059", a bare "89687"), of the
+    /// product bahn.de's `produktGattung` gives, else the one its category stands for.
+    static func line(named name: String, gattung: String? = nil) -> Line {
+        let category = String(name.prefix { $0.isLetter }).uppercased()
+        let number = name.split(separator: " ").last.map(String.init).flatMap { $0.allSatisfy(\.isNumber) ? $0 : nil }
+        var product: Product
+        switch category {
+        case "ICE", "ICD", "ECE", "RJ", "RJX", "TGV", "FR", "EST": product = .highSpeed
+        case "NJ", "EN": product = .nightTrain
+        case "IR", "FLX": product = .interregio
+        case "IC", "EC", "D": product = .longDistance
+        case "RE", "IRE", "REX": product = .regionalExpress
+        case "S": product = .suburban
+        default: product = .regional
+        }
+        // bahn.de's own class wins, except where it is coarser ("REGIONAL" for an RE, "EC_IC" for a Nightjet).
+        let fromGattung = BahnDeClient.product(forGattung: gattung)
+        if ![.nightTrain, .interregio, .regionalExpress].contains(product), fromGattung != .other {
+            product = fromGattung
+        }
+        return Line(name: name, number: number, product: product, operatorName: nil)
     }
 
     private func leg(for shared: SharedConnection.Leg) async throws -> Leg? {
