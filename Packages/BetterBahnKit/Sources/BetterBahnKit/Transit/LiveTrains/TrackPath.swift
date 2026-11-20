@@ -19,6 +19,15 @@ public struct TrackPath: Sendable, Hashable {
 
     public var length: Double { offsets.last ?? 0 }
 
+    /// The part of the track between `start` and `end` meters along it.
+    public func points(from start: Double, to end: Double) -> [Coordinate] {
+        guard let first = coordinate(at: start), let last = coordinate(at: end), end > start else { return [] }
+        var result = [first]
+        for (point, offset) in zip(points, offsets) where offset > start && offset < end { result.append(point) }
+        result.append(last)
+        return result
+    }
+
     public var isEmpty: Bool { points.isEmpty }
 
     /// The point `meters` along the track, clamped to its ends; nil for an empty track.
