@@ -15,6 +15,16 @@ Transitous now supplies station search, journeys, departure/arrival boards and t
 
 No candidate above has been deployed or enabled. A separate MOTIS adapter needs its own data-source identity: station IDs, trip IDs and page cursors must not be assumed interchangeable across instances. `CombinedProvider` retains optional provider injection, cooldown and source-aware routing; pagination stays on its originating provider rather than silently restarting on failure.
 
+## Live train positions
+
+DB's RIS::Maps (DB API Marketplace, our subscription) is the source: the `Cloudflare/positions` Worker asks it with
+our key for every running train of DB Fernverkehr and DB Regio (`POST …/db/apis/ris-maps/v2/journey-positions/` with
+the administration IDs, header `RISMAPS-App-Id: livemap-WebSdk`, 25,000 calls a day) and caches the list for 15 s
+for all users. Each fix carries when it was taken and whether it came from GPS (`SENSOR`) or the interlocking
+(`SIGNALLING`). Other operators (e.g. ODEG, Flixtrain) aren't asked; their trains come from bahn.jetzt, which the app
+(`TrainPositionClient`) asks when the Worker doesn't answer or doesn't know the train. bahn.jetzt is an unofficial
+third-party service (it reads RIS::Maps itself) without a written agreement, so the Worker is the dependable path.
+
 ## Transitous integration
 
 Use only the [documented public endpoint](https://transitous.org/api/), not staging or internal load-balancer hosts as fallbacks. Requests include application/version/contact identification, and Settings links to Transitous data sources and OpenStreetMap attribution. Transitous is a best-effort community service with an open-source, noncommercial usage policy; coordinate routing/resource usage with its operators as described there. Realtime coverage depends on the contributing feeds.
