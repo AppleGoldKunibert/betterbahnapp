@@ -151,6 +151,15 @@ test("the browser draws the page with the same function", async () => {
     assert.equal(render(view), renderJourney(view));
 });
 
+test("the page script defines __name, which the Worker's build puts into renderJourney's source", async () => {
+    const view = await decodeJourney(payload(shared));
+    const html = journeyPageHTML("Ab3xK9zz", view, { style: "", footer: "", nonce: "n0nce123" });
+    const script = html.match(/<script nonce="n0nce123">([\s\S]*?)<\/script>/)[1];
+    const prelude = script.match(/const __name = [^;]+;/)[0];
+    // What esbuild's keepNames makes of an arrow function: the page ran this text and threw "__name is not defined".
+    assert.equal(new Function(`${prelude}return __name(() => 42, "timeCell");`)()(), 42);
+});
+
 test("the page asks for new times every minute while it is visible, and keeps opened stop lists", async () => {
     const view = await decodeJourney(payload(shared));
     const html = journeyPageHTML("Ab3xK9zz", view, { style: "", footer: "", nonce: "n0nce123" });

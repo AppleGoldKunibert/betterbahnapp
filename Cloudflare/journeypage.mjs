@@ -271,6 +271,9 @@ export function journeyPageHTML(id, view, { style, footer, appStoreURL, nonce })
         ? `<a class="button secondary" href="${escape(appStoreURL)}">BetterBahn im App Store</a>` : "";
     const script = nonce ? `<script nonce="${nonce}">
 (() => {
+    // The Worker's build wraps functions in __name(...) (keepNames), and renderJourney is copied here as text: the
+    // browser needs the helper too, else the first redraw throws and the page stays as shared.
+    const __name = target => target;
     const render = ${renderJourney.toString()};
     const box = document.getElementById("journey");
     let timer = null;
