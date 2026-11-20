@@ -102,6 +102,19 @@ test("a train's live times, platform and the transfer into the next one go into 
     assert.equal(view.legs[0].arrival.actual, null);
 });
 
+test("a train on time hours before it leaves is live too: DB knows it, it just reports no change", async () => {
+    const view = await decodeJourney(payload(shared));
+    const quiet = async url => {
+        const [, kind, eva] = url.match(/\/(plan|fchg)\/(\d+)/);
+        const body = kind === "plan" ? plans[eva] : irisTimetable(eva, "");
+        return new Response(body ?? "", { status: body === undefined ? 404 : 200 });
+    };
+    const live = await liveJourney(view, at("10:00"), { fetchUpstream: quiet });
+    assert.equal(live.live, true);
+    assert.equal(live.legs[0].arrival.actual, null);
+    assert.match(renderJourney(live), /Live-Daten der Deutschen Bahn · Stand 10:00/);
+});
+
 test("trains that have arrived or won't run for a long time aren't asked, a finished journey asks nothing", async () => {
     const view = await decodeJourney(payload(shared));
     const fake = iris();
