@@ -9,6 +9,9 @@ struct JourneyMapView: View {
     @Environment(\.dismiss) var dismiss
     @Environment(AppModel.self) private var model
     @State private var mapVersion = 0
+    /// Track geometry looked up for legs that came without it (shared journeys, bahn.de, #573), by leg ID.
+    /// Until it's in, those legs are drawn as straight lines.
+    @State private var loadedGeometry: [String: [Coordinate]] = [:]
     @State private var selectedTransfer: TransferPoint?
     @State private var trains: [LiveTrainPosition] = []
     /// Moves the trains between fixes and shows the other trains around (#505).
@@ -17,7 +20,7 @@ struct JourneyMapView: View {
 
     var body: some View {
         NavigationStack {
-            JourneyMap(journey: journey, version: mapVersion, trains: trains, shownTrains: layer.ownCoordinates,
+            JourneyMap(journey: journey.fillingTrackGeometry(loadedGeometry), version: mapVersion, trains: trains, shownTrains: layer.ownCoordinates,
                        trainSpeeds: layer.ownSpeeds,
                        otherTrains: layer.markers, onRegionChange: { layer.setVisible($0, model: model) },
                        onTrainTap: { tappedTrain = LiveTrainTripRequest(tripId: $0) },
@@ -41,9 +44,31 @@ struct JourneyMapView: View {
             }
         }
         .task { await layer.run(model: model) }
+        .task(id: journey) { await loadTrackGeometry() }
         .sheet(item: $selectedTransfer) { transfer in
             TransferDetailsSheet(transfer: transfer)
         }
+    }
+}
+
+extension JourneyMapView {
+    /// Looks up the tracks of every leg without them at once and redraws the route once, so the map
+    /// zooms only once more.
+    private func loadTrackGeometry() async {
+        let legs = journey.legsWithoutTrackGeometry, model = model
+        guard !legs.isEmpty else { return }
+        let found = await withTaskGroup(of: (String, [Coordinate]?).self) { group in
+            for leg in legs {
+                group.addTask { await (leg.id, model.geometry(for: leg)) }
+            }
+            var found: [String: [Coordinate]] = [:]
+            for await (id, geometry) in group {
+                if let geometry { found[id] = geometry }
+            }
+            return found
+        }
+        guard !Task.isCancelled, !found.isEmpty else { return }
+        loadedGeometry = found
     }
 }
 
