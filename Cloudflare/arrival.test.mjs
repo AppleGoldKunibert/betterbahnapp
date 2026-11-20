@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { AFTER_ARRIVAL, findTrain, irisStops, parseArrival, renderArrival, shownStops } from "./arrival.mjs";
+import { AFTER_ARRIVAL, findTrain, irisStops, parseArrival, renderArrival, shownStops, unix } from "./arrival.mjs";
 import { verifyToken } from "./shared/appattest.mjs";
 import { handleShare } from "./worker.mjs";
 
@@ -349,4 +349,19 @@ test("IRIS is asked only for the stops the page may list", async () => {
     };
     await irisStops({ train: "ICE 1095", number: "1095", stops: longRun() }, { now: at("18:15"), fetchUpstream });
     assert.deepEqual([...asked].sort((a, b) => a - b), [2, 3, 4, 5, 8, 9, 10]);
+});
+
+test("Berlin times between 01:00 and 02:00 keep their offset on the nights the clocks change", () => {
+    const iso = local => new Date(unix(local)).toISOString();
+    // Autumn: 01:30 is still summer time (CEST), the clocks go back at 03:00.
+    assert.equal(iso("2026-10-25T01:30:00"), "2026-10-24T23:30:00.000Z");
+    // Spring: 01:30 is still winter time (CET), the clocks go forward at 02:00.
+    assert.equal(iso("2026-03-29T01:30:00"), "2026-03-29T00:30:00.000Z");
+    // Ordinary times around the change.
+    assert.equal(iso("2026-10-25T00:59:00"), "2026-10-24T22:59:00.000Z");
+    assert.equal(iso("2026-10-25T04:00:00"), "2026-10-25T03:00:00.000Z");
+    assert.equal(iso("2026-03-29T03:00:00"), "2026-03-29T01:00:00.000Z");
+    assert.equal(iso("2026-10-06T18:30:00"), "2026-10-06T16:30:00.000Z");
+    assert.equal(iso("2026-01-15T18:30:00"), "2026-01-15T17:30:00.000Z");
+    assert.equal(unix("später"), null);
 });
