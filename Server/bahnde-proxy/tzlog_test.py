@@ -563,6 +563,8 @@ class TurnaroundTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([t["number"] for t in answer["previous"]], [567])
         self.assertEqual([t["number"] for t in answer["next"]], [1501])
         self.assertEqual(self.asked, ["2026-11-03", "2026-11-02", "2026-11-04"], "the neighbouring days too")
+        self.assertIsNotNone(answer["start"], "the train's own start, from the host")
+        self.assertIn("startEva", answer)
 
     async def test_the_host_is_asked_once_per_trainset_and_half_hour_however_many_look(self):
         self.known(592)
