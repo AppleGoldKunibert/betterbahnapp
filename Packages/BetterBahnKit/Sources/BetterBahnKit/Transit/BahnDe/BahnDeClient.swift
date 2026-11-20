@@ -720,13 +720,28 @@ public struct BahnDeClient: Sendable {
     /// requests held back, then the next one brings a fresh token.
     /// Without a server (tests) the request goes to `url` itself, with `gate`'s cooldown after a block.
     func get<T: Decodable>(_ url: URL, as type: T.Type) async throws -> T {
+        try await fetch(url) { [http, auth] target in try await http.get(target, as: type, headers: Self.headers(), auth: auth) }
+    }
+
+    /// A page instead of JSON (the seat picker's HTML), asked the same way as `get`.
+    func getPage(_ url: URL) async throws -> String {
+        try await fetch(url) { [http, auth] target in
+            var request = URLRequest(url: target, timeoutInterval: http.timeout)
+            for (key, value) in Self.headers() { request.setValue(value, forHTTPHeaderField: key) }
+            request.setValue("text/html", forHTTPHeaderField: "Accept")
+            return String(decoding: try await http.sendRaw(request, auth: auth), as: UTF8.self)
+        }
+    }
+
+    /// `load` on our server's address for `url` (see `get`), or on `url` itself without a server.
+    private func fetch<T>(_ url: URL, _ load: (URL) async throws -> T) async throws -> T {
         if let proxy, let proxied = proxy.url(for: url) {
             var attempt = 1
             while true {
                 if await proxy.gate.isBlocked { throw TransitError.rateLimited }
                 if await proxy.gate.isRefused { throw TransitError.unauthorized }
                 do {
-                    return try await http.get(proxied, as: type, headers: Self.headers(), auth: auth)
+                    return try await load(proxied)
                 } catch TransitError.http(status: 401, let body) where body?.contains("\"unauthorized\"") == true {
                     // Our server's own answer, not the server failing: the app had no valid token at hand (#472).
                     await proxy.gate.refuse()
@@ -760,7 +775,7 @@ public struct BahnDeClient: Sendable {
         }
         if await gate.isBlocked { throw TransitError.rateLimited }
         do {
-            return try await http.get(url, as: type, headers: Self.headers(), auth: auth)
+            return try await load(url)
         } catch let error as TransitError {
             await gate.report(error)
             throw error.isBlocked ? TransitError.rateLimited : error

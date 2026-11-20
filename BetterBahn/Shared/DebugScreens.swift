@@ -171,6 +171,23 @@ extension AppModel {
         return CoachSequence.seatMapDemo(sheet: train.sheet, trainName: "ICE \(train.number)", unit: train.unit, turned: train.turned)
     }
 
+    /// Made-up free seats on a seeded seat-map train: two of every three seats, none in the coach of the reservation.
+    func debugSeatAvailability(for leg: Leg) -> SeatAvailability? {
+        guard leg.tripId?.hasPrefix("seatseed-") == true,
+              let train = Self.seatMapDemoTrains.first(where: { $0.number == leg.line?.number }),
+              let sequence = CoachSequence.seatMapDemo(sheet: train.sheet, trainName: "ICE \(train.number)", unit: train.unit, turned: train.turned)
+        else { return nil }
+        var coaches: [String: [String: SeatAvailability.Status]] = [:]
+        for coach in sequence.coaches {
+            guard let number = coach.number, let map = sequence.seatMap(for: coach) else { continue }
+            let full = number == train.reservation.coach
+            coaches[number] = Dictionary(map.seats.enumerated().map { index, seat in
+                (seat.number, !full && index % 3 != 0 ? SeatAvailability.Status.free : .unavailable)
+            }, uniquingKeysWith: { first, _ in first })
+        }
+        return SeatAvailability(coaches: coaches)
+    }
+
     /// The seat reservation of a seeded seat-map train.
     func debugReservation(for leg: Leg) -> SeatReservation? {
         if let advice = debugAdviceReservation(for: leg) { return advice }

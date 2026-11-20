@@ -13,9 +13,9 @@ only the files you change. Keep it current when structure changes. Build, test a
 | `BetterBahnShare/` | `ShareViewController`: shared DB text/URL → `betterbahn://import?...`. |
 | `Packages/BetterBahnKit/` | Models, networking, logic (iOS 26 + macOS 26, all `Sendable`) and tests. |
 | `Config/` | xcconfigs, Info.plists, entitlements. `Signing.xcconfig` holds the team ID; gitignored `Local.xcconfig` overrides it. |
-| `Cloudflare/` | Worker `betterbahn` (`wrangler.toml`): Träwelling OAuth bounce to `betterbahn://oauth`, privacy policy `/datenschutz`, support page `/support`, short links (`/share`, `/s/<id>`, `apple-app-site-association`, KV 30 days, App Attest + rate limit). "Ankunft teilen" (#317, `arrival.mjs`): with the last train attached, `/s/<id>` is a pickup page (arrival, delay, platform, stops), live from IRIS per stop, else bahn.de's `fahrt` via `Server/bahnde-proxy` (refusals logged as `arrival upstream`), refreshing via `/share/<id>/live`; such links expire 2 h after the arrival. |
+| `Cloudflare/` | Worker `betterbahn` (`wrangler.toml`): Träwelling OAuth bounce to `betterbahn://oauth`, privacy policy `/datenschutz`, support page `/support`, short links (`/share`, `/s/<id>`, `apple-app-site-association`, KV 30 days, App Attest + rate limit); without the app `/s/<id>` shows the whole journey as a web page (`journeypage.mjs` decodes the stored payload, `node --test Cloudflare/journeypage.test.mjs`) that refreshes every minute while open: `/share/<id>/live` puts DB's live times into each train not yet arrived (`journeylive.mjs` on top of `arrival.mjs`' `liveTrain`: IRIS, else bahn.de; answer cached 55 s per link, nothing runs without a reader; `node --test Cloudflare/journeylive.test.mjs`). "Ankunft teilen" (#317, `arrival.mjs`): with the last train attached, `/s/<id>` is a pickup page (arrival, delay, platform, stops), live from IRIS per stop, else bahn.de's `fahrt` via `Server/bahnde-proxy` (refusals logged as `arrival upstream`), refreshing via `/share/<id>/live`; such links expire 2 h after the arrival. |
 | `Cloudflare/bahnde-proxy/` | Worker `betterbahn2`: DB Timetables (`/timetables/v1/…`, API key as secret), DB FaSta's lifts out of order (`/fasta/v2/facilities`, always the whole list, 5 min, #486) and App Attest tokens (`/auth/…`; Android gets the same token with Play Integrity at `/auth/play`, `shared/playintegrity.mjs`). No bahn.de paths: bahn.de refuses Workers since October 2026. `TimetablesClient.baseURL`, `WorkerAuth.baseURL`; `BahnDeClient.baseURL` is only the template `BahnDeProxy` rewrites to the server. |
-| `Server/bahnde-proxy/` | Docker server (Python, curl_cffi) asking bahn.de with a browser's TLS fingerprint, which Akamai demands and Workers can't make (#342): bahn.de's `/web/api/…` paths with the Worker's App Attest tokens, cache, rate limit, requests to bahn.de spaced `MIN_INTERVAL` apart, pause after a block (a new session; requests running on the old one finish there, #411). The app's only way to bahn.de (`BahnDeProxy.baseURL`; game-server host behind Tailscale Funnel, `panel_boot.py`; bahn.de refuses Oracle Cloud). `python3 -m unittest Server/bahnde-proxy/proxy_test.py`. |
+| `Server/bahnde-proxy/` | Docker server (Python, curl_cffi) asking bahn.de with a browser's TLS fingerprint, which Akamai demands and Workers can't make (#342): bahn.de's `/web/api/…` paths with the Worker's App Attest tokens, cache, rate limit, requests to bahn.de spaced `MIN_INTERVAL` apart, pause after a block (a new session; requests running on the old one finish there, #411). The app's only way to bahn.de (`BahnDeProxy.baseURL`; game-server host behind Tailscale Funnel, `panel_boot.py`; bahn.de refuses Oracle Cloud). Also the seat picker's `gsd/gsd_v3` (seats that can be reserved per train and class, `data` = JSON with stops, planned times, train number, class and a `correlationID` of any value, no `zugfahrtKey`; answer as HTML with the JSON in `ssr_data`, `status` 0 not bookable, 1 free, 2 suggested; 409 `WEB_RES_KEIN_PLATZ_VERFUEGBAR` when booked out) and `gsd/api/wagentypen/<type>` (a coach's seat plan, unused by the app, which has DB's drawings offline). The seat map shows `gsd_v3`'s free seats (`SeatAvailability`). `python3 -m unittest Server/bahnde-proxy/proxy_test.py`. |
 | `Cloudflare/pass-signer/` | Worker `betterbahn-pass`: signs Wallet passes for DB tickets (Pass Type ID certificate as secrets). Needs App Attest, only UIC `#UT` barcodes whose issuer signature verifies (`uicsignature.mjs`). `npm install && npm test`. |
 | `Cloudflare/stats/` | Worker `betterbahn-stats` (D1) answering `POST /train-stats` (#316): per train number and stop the delays, cancellations and platform moves of 30 days, one row per train and day (`schema.sql`, `train_days`). `long_distance_days` keeps the ICE/IC/EC … runs for ~400 days, so a request with a `day` gets that day's run with its stops' real delays (`run`). Filled daily by `importer.py` from piebro/deutsche-bahn-data (CC BY 4.0; Action `train-stats-import.yml`), so nothing asks bahn.de and the app reports nothing (#336). `node --test Cloudflare/stats/worker.test.mjs`, `python3 -m unittest Cloudflare/stats/importer_test.py`. |
 | `Cloudflare/checkin-push/` | Worker `betterbahn-push` (D1, cron every minute): keeps the app's Träwelling login (#452, `logins.mjs`, table `logins`, AES-GCM): `POST /logins` (code + PKCE verifier, or an old refresh token handed over), `POST /logins/<id>/token` (renews below 15 min left, one request at a time via `renewing`), `PUT` signs in again in place, `DELETE` logs out; the cron renews logins idle for 20 days and ends those unused for 180; old D1 needs `migrations/0002_…`. Notifications read with that login (`login_id`; sign-ups from before have their own), per `kinds` (#447) checks the dashboard (`followed`) and Träwelling's notifications (`likes`: `StatusLiked`, `companions`: `UserJoinedConnection`) every 2 min, sends APNs pushes (`followedStatusID`, `ownStatusID`, `companionStatusID`); likes/fellow travellers also right away via Träwelling's webhook (`/traewelling/webhook`, made with the app's login when `/login-options` offers it while `TRAEWELLING_WEBHOOKS` is "true"; pushes to every sign-up on the login); old D1 needs `migrations/0001_…` before deploying, and `migrations/0003_…` for the app's notification language (#479). Also regular trips (#397, `commute.mjs`, table `commutes`): `PUT /commutes/<id>` with the day's trains (category + number, EVA + planned times), found in IRIS' `plan`, then `fchg` every 2 min from 2 h before departure → cancellation, delay from the threshold (again +5), platform change, tight transfer (`commuteJourneyID`); never bahn.de. APNs in `apns.mjs`. `node --test Cloudflare/checkin-push/*.test.mjs`. |
@@ -172,7 +172,9 @@ in `project.pbxproj`: new files join their target automatically.
   Tapping an ICE coach (bahn.de's sequence only) opens `SeatMapSheet` (`SeatMapView.swift`, #365): the coaches from
   above in the diagram's order, each turned round when its trainset stands with the higher numbers on the left
   (`SeatMap.isTurned`), seat numbers drawn on top and the pictograms (`SeatMap.icons`) drawn again from the unturned
-  drawing, so both stay upright; the leg's reserved seat highlighted. Coach advice (#383): `CoachTile.suggested`
+  drawing, so both stay upright; the leg's reserved seat highlighted. Opened from a journey's leg, the seats still free on
+  the ride in Settings' class are green and each coach's title says how many ("12 frei"), with a note above
+  (`AppModel.seatAvailability(for:)`, Kit `SeatAvailability`); nothing for coaches of the other class or a coupled train. Coach advice (#383): `CoachTile.suggested`
   (dashed frame) for `CoachSequence.coachIDs(for:)`, `CoachAdvice.legend` below (not for the exit, `notesCoachAdvice`,
   as the card says it right below); `CoachAdviceLabel` in `TransferRow`
   (its own full-width line, without the station) and, for the exit, in the last `LegCard` (`JourneyDetailView.loadCoachAdvice`, `AppModel.coachAdvice(for:)`).
@@ -186,6 +188,7 @@ in `project.pbxproj`: new files join their target automatically.
   and `trainSearchCountries` (Germany), both synced. `TrainSearchResultView`: "Zugdetails anzeigen" (`TripView`),
   Wagenreihung (next stop; `CoachSequenceByStop` unfolds a list of the other stops, `BahnDeClient.formationStops(of:)`;
   a train not running starts at its first stop), "Auf Karte zeigen" (only while bahn.jetzt has a position).
+  Trainsets (#502): a Tz number ("Tz 8043", "8043") or part of a Taufname or livery ("Hamburg" finds "Freie und Hansestadt Hamburg", Kit `TzSearch`: every typed word must start a word of the name, from four letters inside one; accents and case don't matter) show as rows above the trains, which open `TzRunsView` ("Alle") in a sheet.
 - `Features/Map/` – `TravelMapView` heatmap of past trips (`TravelMapHeatmap`; `RailwayTileOverlay`: OpenRailwayMap,
   512 px, disk cache 7 days, 10-min pause after 403/429). A ride both saved and checked in is drawn from the check-in
   (`RideMatch.uncovered`). `YearReviewView` (#319, "Jahresrückblick", only via `YearReviewBanner` on Verbindungen in
@@ -219,6 +222,9 @@ in `project.pbxproj`: new files join their target automatically.
   series (`TrainSeriesTag` remembers it until a Tz is seen); liveries and trainsets need the Tz. "Neu" badges: IDs collected since the last
   visit (`newCollectionIDs`, UserDefaults `collectionSeenIDs`, the first computation is the starting point).
   Fahrkarte (#504) shows the categories as small tickets and items as round stamps, dashed until collected.
+  Trips of a Tz (#502, `TzRunsView` in `TzListView.swift`): a Tz row (opened or not ridden yet) and a Tz/livery item's sheet
+  ("Fahrten" on top) open "Meine" (own rides, which open their journey) and "Alle" (`TzLogClient.history(of:)`: today,
+  then each day of the last year, from the server's Tz log); a run opens its Zuglauf (`TzTrainRunView`: found by number on that day like in the train search, shown as `TrainSearchResultView`; days DB no longer has say so).
 - `Features/Tickets/` – `TicketLookupView` (bahn.de's "Auftragssuche" in a hidden SwiftUI `WebView`:
   `DBOrderPage.fillScript` fills the form, `fetchScript` fetches order + PDFs inside the page; shown only when bahn.de
   asks for more, e.g. a captcha), `TicketView` (full-brightness barcode, PDF, `AddToWalletButton`, "Zugbindung
@@ -457,6 +463,12 @@ in `project.pbxproj`: new files join their target automatically.
   (`SeatMap.sheet`: ICE 1 with 12 or, modernised, 9 middle coaches; ICE 4 with 7, 12 or 13; all BR 403 on the Redesign
   sheet); `CoachSequence.seatMap(for:)` by coach number. Misprints on DB's sheets are fixed in the
   script's `CORRECTIONS` (408 Wagen 24: 76–78 printed as 75–77; 401.LDV Wagen 6: 42 printed as 43).
+- `Transit/BahnDe/SeatAvailability.swift` – free seats from bahn.de's seat picker (`gsd/gsd_v3` through our server):
+  `BahnDeClient.seatRequest(for:travelClass:)` from the next stop the train leaves (the leg's origin until it has left) to the
+  leg's end, long-distance trains only; `seatAvailability(_:)` sends the booking's `data` JSON (planned times in German local
+  time, `quellSystem` SIMA, `inventarsystem` RIFF, one person), reads the seats from the page's `ssr_data` (`status` 0
+  not to be had, 1 free, 2 the one bahn.de would pick), 409 = `bookedOutAnswer`; a 422 is asked again at Berlin Hbf's other
+  level; cached a minute. Its `correlationID` is a hash of the ride (`stableHash`), so the same ride gives the same URL and our server's cache answers it. Debug builds: `-seedSeatMapTrips` trains get made-up free seats (`debugSeatAvailability`).
 - `Transit/BahnDe/CoachAdvice.swift`, `StationPlatforms.swift` – where to board (#383). `StationPlatforms.at(eva:)` from
   `Resources/Platforms.json` (`scripts/make-platforms.py`): tracks sharing a platform, per track the OSM platform
   edge (ends, length), stairs/lifts/terminus exit and sector signs in metres along it. `CoachAdvice.plan(for:…)` per
@@ -485,6 +497,10 @@ in `project.pbxproj`: new files join their target automatically.
   departure; the feed's trip ID can change), `trainName` as reservations name it ("RE 3307" for a regional line's
   run), `offered(on:)` from 15 min before the departure until the arrival, `saving(_:for:in:)` keeps one per ride
   and drops those 6 h past their arrival. `AppModel.savedSeats` (`savedSeats.json`, this device only).
+- `Transit/TzLog/TzLogClient.swift` (#502) – reads our server's Tz log (`BahnDeProxy.baseURL` + `/tz/list`, `/tz/history?tz=`,
+  App Attest token like the bahn.de requests): `TzUnit` (Tz, group name "ICE8043"/"ICD4886", vehicle construction types
+  → `series` via `BahnDeClient.model`, Taufname, livery, trains of the latest day) and `TzTurnaround` (`turnaround(category:number:day:)`, the trains just before and after a train's trainset, refreshed by the server when a trip is looked at, at most every 30 min per trainset) and `TzRun` (day in Germany,
+  train, destination, `changedFromPlan` when bahn.de's `sequenceStatus` is `DIFFERS_FROM_SCHEDULE`).
 - `Transit/Vagonweb/` – vagonweb.cz (with permission, #95): planned compositions for the timetable year from the train's
   HTML (`VagonwebComposition.scheduled`, fixtures `vagonweb-ice*.html`), used when bahn.de has none: `AppModel.trainType`
   and "Plan-Wagenreihung" (`CoachSequence.source == .vagonweb`). Cloudflare bot check → hidden `WebPage`
@@ -607,7 +623,7 @@ in `project.pbxproj`: new files join their target automatically.
   at the destination against the first booked plan (`previousVersions`), 25 % from 60 min, 50 % from 120; only with a
   ticket, BahnCard 100 or a long-distance train; `requestFields` for DB's form (day, departure and trains of the
   booked plan, `bookedPlan`; after a replan also "Gefahrene Züge").
-- `Sharing/` – `JourneyShareLink` (encoding, payload limits, short IDs), `ShortShareLinkClient` (long link as
+- `Sharing/` – `JourneyShareLink` (encoding, payload limits, short IDs; the shared copy gets every station's EVA number from `StationNames`, `Journey.addingEvaNumbers`, as the share page's live times ask IRIS by it), `ShortShareLinkClient` (long link as
   fallback; `arrivalURL`), `ArrivalShare` (#317: last train from boarding to exit, bahn.de journey ID via
   `BahnDeClient.journeyId(for:)`, EVA numbers), `DBShare` + `DBShareImporter` (DB Navigator/bahn.de shared text).
 - `Widgets/` – `WidgetSnapshot` + `WidgetStore` (App Group JSON), `JourneyWidgetState` (phase, next stop and delay,
