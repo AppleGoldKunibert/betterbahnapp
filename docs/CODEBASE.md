@@ -590,7 +590,9 @@ in `project.pbxproj`: new files join their target automatically.
   the next; `passedViaCount`: vias behind the exit, matched in order along all stops so a round trip's late via stays ahead), `ConnectionCheck` (`ConnectionIssue`, `JourneyRefresher`: `refreshEnds`
   for every result on screen, `refresh` through `LiveRun`), `ExitReminder`, `PlatformChange` (push,
   ignores sectors/bus bays), `TrainRoutePlanner`, `ViaRoutePlanner` (vias without stay keep a through train as one
-  leg), `TrainPicker` ("Anderer Zug": `replacing` + `MissedConnection` #226, `reroutes` "Andere Routenführung",
+  leg; "Frühere/Spätere Verbindungen" for a via search, #571: `journeys(…before:)` searches again from 1, 3, then 6 h
+  before the earliest shown departure, `journeys(…after:)` from just after the latest; `JourneyResultsView` keeps
+  `viaCursor` as stand-in cursor while a page finds routes), `TrainPicker` ("Anderer Zug": `replacing` + `MissedConnection` #226, `reroutes` "Andere Routenführung",
   `journeysIgnoringBoardingRules`, `journeysContinuingFromRestrictedTrains`, both added in `JourneyResultsView`),
   `StationCalls` (hides routes doubling back through origin/destination; not for vias), `TicketFilter`/`BC100Rules`,
   `BoardFilter`, `ManualStop` (`Stopover.manual`, `isManual` survives refreshes unlike `isAdditional`;
