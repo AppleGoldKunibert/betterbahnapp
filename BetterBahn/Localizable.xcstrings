@@ -7204,22 +7204,22 @@
         }
       }
     },
-    "Wendet aus %@" : {
+    "Wendet aus" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Turns from %@"
+            "value" : "Turns from"
           }
         }
       }
     },
-    "Wendet zu %@" : {
+    "Wendet zu" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Turns into %@"
+            "value" : "Turns into"
           }
         }
       }

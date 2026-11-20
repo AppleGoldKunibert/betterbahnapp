@@ -298,6 +298,8 @@ struct TripContent: View {
     @AppStorage("showPlannedTimes") private var showPlannedTimes = false
     /// Set once a boarding/exit stop was picked by hand; from then on the "Tippe auf Halte" tip stays hidden.
     @AppStorage("pickedTripStop") private var pickedTripStop = false
+    /// The trains this train's trainset ran as before and runs as after it (#501), at its first and last stop.
+    @State private var turnaround: TzTurnaround?
     /// Read when the view appears, so the tip doesn't vanish (and move the stops) while picking them.
     @State private var showsStopTip = !UserDefaults.standard.bool(forKey: "pickedTripStop")
     /// The stop whose platform was tapped: its Wagenreihung is unfolded below it.
@@ -445,6 +447,9 @@ struct TripContent: View {
 
             ForEach(trip.remarks, id: \.self) { RemarkRow(text: $0) }
         }
+        // Without a planned departure the day's start, which doesn't change every minute like `.now`.
+        .trainTurnaround(line: trip.line, date: trip.stopovers.first?.departure?.planned ?? Calendar.current.startOfDay(for: .now),
+                         into: $turnaround)
         .task(id: trip.stopovers.map(\.id)) {
             guard let bahnDe = model.provider.bahnDe, let found = try? await bahnDe.operatorStops(for: trip) else { return }
             operatorStops = found
@@ -495,9 +500,6 @@ struct TripContent: View {
             TrainOperatorsLabel(source: .trip(trip)).font(.caption).foregroundStyle(.tertiary)
         }
         TrainFormationLabel(trip: trip, savedLeg: savedLeg)
-        // Without a planned departure the day's start, which doesn't change every minute like `.now`.
-        TrainTurnaroundLabel(line: trip.line, date: trip.stopovers.first?.departure?.planned
-                                 ?? Calendar.current.startOfDay(for: .now))
     }
 
     private var headerButtons: some View {
@@ -679,6 +681,11 @@ struct TripContent: View {
                             ExitSideArrow(side: exitSide)
                         }
                     }
+                }
+                if index == 0, let previous = turnaround?.previous, !previous.isEmpty {
+                    TrainTurnaroundLinks(trains: previous, side: .from).padding(.leading, 78)
+                } else if index == trip.stopovers.count - 1, let next = turnaround?.next, !next.isEmpty {
+                    TrainTurnaroundLinks(trains: next, side: .to).padding(.leading, 78)
                 }
                 if sequenceStopID == stop.id, let request = coachSequenceRequest(at: stop) {
                     CoachSequencePanel(request: request, run: ExitSides.Run(trip: trip))

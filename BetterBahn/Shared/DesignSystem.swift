@@ -547,42 +547,54 @@ struct TrainFormationLabel: View {
     }
 }
 
-/// "Wendet aus ICE 567 · Wendet zu ICE 1501": the trains the train's trainset ran as before and runs as after it.
-/// Only shown when our server's Tz log knows them, which it does around the day of the ride; it asks again every
-/// 30 minutes while the trip is open.
-struct TrainTurnaroundLabel: View {
-    let line: Line?
-    let date: Date
+/// "Wendet aus ICE 567" at a train's first stop, "Wendet zu ICE 1501" at its last (#501): the trains its trainset ran
+/// as before and runs as after it, from our server's Tz log. Each opens that train.
+struct TrainTurnaroundLinks: View {
+    enum Side { case from, to }
 
-    @Environment(AppModel.self) private var model
-    @State private var turnaround: TzTurnaround?
-
-    private var text: String? {
-        guard let turnaround else { return nil }
-        var parts: [String] = []
-        if !turnaround.previous.isEmpty {
-            parts.append(String(localized: "Wendet aus \(turnaround.previous.map(\.name).formatted(.list(type: .and)))"))
-        }
-        if !turnaround.next.isEmpty {
-            parts.append(String(localized: "Wendet zu \(turnaround.next.map(\.name).formatted(.list(type: .and)))"))
-        }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
-    }
+    let trains: [TzTurnaround.Train]
+    let side: Side
 
     var body: some View {
-        // A ZStack rather than Group: `.task` never fires on a view that is empty.
-        ZStack(alignment: .leading) {
-            if let text {
-                Label(text, systemImage: "arrow.triangle.turn.up.right.diamond")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fullTextPopup(text, lines: 2)
+        HStack(spacing: 6) {
+            Image(systemName: side == .from ? "arrow.turn.left.down" : "arrow.turn.right.up")
+            Text(side == .from ? "Wendet aus" : "Wendet zu")
+            ForEach(trains) { train in
+                NavigationLink {
+                    TzTrainRunView(run: TzRun(day: train.day, category: train.category, number: train.number))
+                } label: {
+                    Text(train.name)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(Color.brandText)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
             }
         }
-        .task(id: "\(line?.name ?? "")|\(Int(date.timeIntervalSince1970 / 60))") {
-            // Only while the trip is on screen (the task ends with the view); the model answers from its cache in between.
+        .font(.caption)
+        .foregroundStyle(.secondary)
+    }
+}
+
+extension View {
+    /// Keeps `value` at the train's turnaround (#501) while the view is on screen; only known around the day of the
+    /// ride. Asks again every 30 minutes, the model answers from its cache in between.
+    func trainTurnaround(line: Line?, date: Date, into value: Binding<TzTurnaround?>) -> some View {
+        modifier(TrainTurnaroundLoader(line: line, date: date, value: value))
+    }
+}
+
+private struct TrainTurnaroundLoader: ViewModifier {
+    let line: Line?
+    let date: Date
+    @Binding var value: TzTurnaround?
+    @Environment(AppModel.self) private var model
+
+    func body(content: Content) -> some View {
+        content.task(id: "\(line?.name ?? "")|\(Int(date.timeIntervalSince1970 / 60))") {
+            guard BahnDeClient.trainReference(for: line) != nil else { return }
             while !Task.isCancelled {
-                turnaround = await model.turnaround(for: line, on: date)
+                value = await model.turnaround(for: line, on: date)
                 try? await Task.sleep(for: .seconds(30 * 60))
             }
         }
