@@ -323,3 +323,55 @@ test("forgets a journey long after its arrival without asking anyone", async () 
     assert.equal(fetch.calls.length, 0);
     assert.equal(env.DB.rows().length, 0);
 });
+
+test("keeps following a train that got much later after the handover until its real arrival", async () => {
+    const env = await environment();
+    await handedOver(env);
+    assert.equal(env.DB.rows()[0].ends, m(65));
+    // 12:30: DB now expects the train at 13:40, 40 minutes late.
+    const late = fakeUpstream({
+        ...PLANS,
+        [`${IRIS}fchg/1000002`]: `<timetable><s id="mitte-1" eva="1000002"><ar ct="2610171340"/></s></timetable>`,
+        [`${IRIS}fchg/`]: "<timetable/>",
+        "https://api.push.apple.com/": "",
+    });
+    env.DB.db.prepare("UPDATE activities SET next_check = ?").run(m(30));
+    await processDueActivities(env, m(30) * 1000, { fetch: late });
+    assert.equal(late.pushes()[0].body.aps.event, "update");
+    assert.equal(env.DB.rows()[0].ends, m(105));
+
+    // 13:36, past the arrival planned at the handover plus 35 minutes: still followed.
+    env.DB.db.prepare("UPDATE activities SET next_check = ?").run(m(96));
+    await processDueActivities(env, m(96) * 1000, { fetch: late });
+    assert.equal(env.DB.rows().length, 1);
+    assert.ok(late.calls.some(call => call.url === `${IRIS}fchg/1000002`));
+
+    // 13:41: arrived, ended with "Angekommen" until 13:45.
+    env.DB.db.prepare("UPDATE activities SET next_check = ?").run(m(101));
+    await processDueActivities(env, m(101) * 1000, { fetch: late });
+    const end = late.pushes().at(-1).body.aps;
+    assert.equal(end.event, "end");
+    assert.equal(end["dismissal-date"], m(105));
+    assert.equal(env.DB.rows().length, 0);
+});
+
+test("forgets a journey hours after its planned arrival however late the train is", async () => {
+    const env = await environment();
+    await handedOver(env);
+    // DB expects the train 7 hours late.
+    const late = fakeUpstream({
+        ...PLANS,
+        [`${IRIS}fchg/1000002`]: `<timetable><s id="mitte-1" eva="1000002"><ar ct="2610172000"/></s></timetable>`,
+        [`${IRIS}fchg/`]: "<timetable/>",
+        "https://api.push.apple.com/": "",
+    });
+    env.DB.db.prepare("UPDATE activities SET next_check = ?").run(m(30));
+    await processDueActivities(env, m(30) * 1000, { fetch: late });
+    assert.equal(env.DB.rows()[0].ends, m(60 + 360 + 5));
+
+    const fetch = fakeUpstream({});
+    env.DB.db.prepare("UPDATE activities SET next_check = 0").run();
+    await processDueActivities(env, m(60 + 360 + 36) * 1000, { fetch });
+    assert.equal(fetch.calls.length, 0);
+    assert.equal(env.DB.rows().length, 0);
+});
