@@ -165,6 +165,13 @@ import Testing
         // A short transfer has none.
         #expect(JourneyWeather(destination: weather.destination).arrival(of: first, in: journey) == nil)
 
+        // #541: a walk after the last train has no card, so the train's card shows the destination's forecast.
+        let cathedral = station("erfurt-dom", "Erfurt Domplatz", 50.977, 11.023)
+        let walk = leg("walk", erfurt, cathedral, 240, 250, walking: true)
+        let walkingToTheEnd = Journey(legs: [first, second, walk], source: .transitous)
+        #expect(weather.arrival(of: second, in: walkingToTheEnd) == LegArrivalWeather(forecast: weather.destination!, atDestination: true))
+        #expect(weather.arrival(of: walk, in: walkingToTheEnd) == nil)
+
         // Arrived already: nothing left to show.
         let over = await client().weather(for: journey, now: Self.now.addingTimeInterval(5 * 3600))
         #expect(over == JourneyWeather())
