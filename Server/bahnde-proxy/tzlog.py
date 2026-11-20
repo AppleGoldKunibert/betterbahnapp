@@ -479,7 +479,7 @@ class Turnaround:
                 return
 
     async def lookup(self, category, number, day):
-        """{"tz", "previous", "next"} for a train on `day` (`yyyy-MM-dd`); the neighbours are the Tz's trains that
+        """{"tz", "start", "startEva", "previous", "next"} for a train on `day` (`yyyy-MM-dd`); the neighbours are the Tz's trains that
         start just before and just after it (several when two start together)."""
         tz = self.store.tz_of(day, category, number)
         if tz is None:
@@ -487,17 +487,18 @@ class Turnaround:
         await self.refresh(tz, day)
         center = dt.date.fromisoformat(day)
         rows = self.store.journeys(tz, (center - dt.timedelta(days=1)).isoformat(), (center + dt.timedelta(days=1)).isoformat())
-        starts = [r[3] for r in rows if (r[0], r[1], r[2]) == (day, category, number)]
-        if not starts:
+        own = [r for r in rows if (r[0], r[1], r[2]) == (day, category, number)]
+        if not own:
             return {"tz": tz, "previous": [], "next": []}
-        mine = starts[0]
+        mine = own[0][3]
         before = [r for r in rows if r[3] < mine]
         after = [r for r in rows if r[3] > mine]
 
         def trains(group):
             return [{"day": r[0], "category": r[1], "number": r[2], "start": r[3], "startEva": r[4]} for r in group]
 
-        return {"tz": tz,
+        # The train's own start, so the app can tell whether a leg boards where it starts ("Wendet aus" there).
+        return {"tz": tz, "start": mine, "startEva": own[0][4],
                 "previous": trains([r for r in before if r[3] == before[-1][3]]) if before else [],
                 "next": trains([r for r in after if r[3] == after[0][3]]) if after else []}
 
