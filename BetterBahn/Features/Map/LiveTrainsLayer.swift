@@ -449,13 +449,18 @@ struct OtherTrainMarkerView: View {
     var onTap: () -> Void = {}
     var onOpen: () -> Void = {}
 
+    /// The dot's diameter.
+    private var dotSize: CGFloat { marker.isLongDistance ? 22 : 18 }
+
+    /// Place it with `Annotation(…, anchor: .leading)`: the dot then stays on the train's position while the name or
+    /// callout opens to its right (centred, the widening marker would push the dot sideways).
     var body: some View {
         HStack(spacing: 4) {
             Button(action: onTap) {
                 Image(systemName: "tram.fill")
                     .font(.system(size: marker.isLongDistance ? 11 : 9, weight: .bold))
                     .foregroundStyle(.white)
-                    .frame(width: marker.isLongDistance ? 22 : 18, height: marker.isLongDistance ? 22 : 18)
+                    .frame(width: dotSize, height: dotSize)
                     .background(Color.gray.opacity(marker.isLongDistance ? 0.95 : 0.8), in: .circle)
                     .overlay { Circle().stroke(.white, lineWidth: 1.5) }
             }
@@ -491,6 +496,7 @@ struct OtherTrainMarkerView: View {
                     .accessibilityHidden(true)
             }
         }
+        .offset(x: -dotSize / 2)
     }
 }
 

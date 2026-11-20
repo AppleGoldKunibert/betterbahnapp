@@ -182,7 +182,8 @@ struct LiveTrainMapView: View {
                     }
                 }
                 ForEach(layer.markers) { marker in
-                    Annotation(marker.name, coordinate: marker.coordinate.clCoordinate, anchor: .center) {
+                    // Leading: the dot stays put when its name or callout opens (see `OtherTrainMarkerView`).
+                    Annotation(marker.name, coordinate: marker.coordinate.clCoordinate, anchor: .leading) {
                         OtherTrainMarkerView(marker: marker, showsName: showsTrainNames, isSelected: selectedTrain == marker.id,
                                              onTap: { selectedTrain = selectedTrain == marker.id ? nil : marker.id },
                                              onOpen: { tappedTrain = marker.opening.map(LiveTrainTripRequest.init(opening:)) })
