@@ -52,7 +52,8 @@ async function legWithLiveTimes(leg, now, deps) {
     };
     if (!train.train) return null;
     const answer = await liveTrain(train, { ...deps, now });
-    if (!answer.live) return null;
+    // A train DB knows but reports no change for is on time as planned: that is live data too.
+    if (!answer.live && !answer.known) return null;
     return merge(leg, stops, answer);
 }
 
