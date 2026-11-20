@@ -32,12 +32,17 @@ import Testing
         #expect(leg.origin.evaNumber == "8011160")
         #expect(leg.destination.evaNumber == "8010089")
         #expect(leg.stopovers.map(\.station.evaNumber) == ["8011160", nil, "8002549", "8010089"])
-        // Names, IDs and everything else are untouched.
+        // IDs and everything else are untouched; the names are DB's, as the app shows them.
         #expect(leg.origin.id == berlin.id)
-        #expect(leg.origin.name == berlin.name)
+        #expect(leg.origin.name == berlin.displayName)
+        #expect(leg.origin.name != berlin.name)
+        #expect(leg.destination.name == dresden.displayName)
+        #expect(leg.stopovers.map(\.station.name) == journey.legs[0].stopovers.map(\.station.displayName))
+        #expect(leg.stopovers[1].station.name == "Testhausen Ost")
         #expect(leg.stopovers.map(\.station.id) == journey.legs[0].stopovers.map(\.station.id))
         // The journey itself is unchanged.
         #expect(journey.legs[0].origin.evaNumber == nil)
+        #expect(journey.legs[0].origin.name == "S+U Berlin Hauptbahnhof")
     }
 
     static func journey() -> Journey {
