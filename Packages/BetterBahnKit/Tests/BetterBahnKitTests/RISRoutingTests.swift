@@ -35,6 +35,21 @@ import Testing
         #expect(limited["filterTransports"] as? [String] == ["HIGH_SPEED_TRAIN", "INTERCITY_TRAIN"])
     }
 
+    /// With the D-Ticket filter on, DB's routing is asked only for local trains, so a long-distance route
+    /// (München → Berlin) isn't answered with ICEs the filter would then hide.
+    @Test func deutschlandticketAsksOnlyForLocalTransport() throws {
+        let departure = try date("2026-11-04T07:00:00Z")
+        let products = TicketFilter.deutschlandticket.narrowing(Set(Product.allCases))
+        let body = RISRoutingProvider.requestBody(JourneyQuery(from: berlin, to: munich, date: departure, products: products),
+                                                  from: "8011160", to: "8000261")
+        let types = try #require(body["filterTransports"] as? [String])
+        #expect(!types.contains("HIGH_SPEED_TRAIN") && !types.contains("INTERCITY_TRAIN"))
+        #expect(types.contains("REGIONAL_TRAIN") && types.contains("CITY_TRAIN"))
+        // The BahnCard 100 keeps everything: no filter in the request.
+        let bc100 = TicketFilter.bahnCard100(.default).narrowing(Set(Product.allCases))
+        #expect(bc100 == Set(Product.allCases))
+    }
+
     /// An ICE straight through: named, numbered and with platforms as DB has them; "Hält nur zum Einsteigen"
     /// marks the stop, and a plan without live data ("SCHEDULE") has no live time.
     @Test func longDistanceTrainWithItsStops() throws {

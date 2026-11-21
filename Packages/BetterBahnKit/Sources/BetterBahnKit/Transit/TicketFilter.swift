@@ -51,6 +51,16 @@ public enum TicketFilter: Sendable, Hashable {
         "ICE", "IC", "EC", "ECE", "TGV", "RJ", "RJX", "NJ", "EN", "FLX", "ES", "EST", "THA", "WB",
     ]
 
+    /// `products` without the ones the ticket never covers, for the search itself: DB's routing then looks only
+    /// among the trains the ticket is valid on, instead of answering with ICEs that the filter hides afterwards
+    /// (München → Berlin would show nothing). The BahnCard 100 covers whatever its rules allow, so it keeps all.
+    public func narrowing(_ products: Set<Product>) -> Set<Product> {
+        switch self {
+        case .bahnCard100: products
+        case .deutschlandticket: products.subtracting(Self.excludedDeutschlandticketProducts).subtracting([.nightTrain])
+        }
+    }
+
     public func isValid(_ line: Line?) -> Bool {
         switch self {
         case .bahnCard100(let rules):
