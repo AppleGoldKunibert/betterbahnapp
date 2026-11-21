@@ -381,7 +381,7 @@ in `project.pbxproj`: new files join their target automatically.
   from RIS::Boards. Source `.bahnDe`; trip IDs are RIS journey IDs or `IRISTripReference` ("iris|ICE|23|eva|epoch|d"),
   opened by `RISRoutingProvider.trip(id:)` from RIS::Journeys (`RISJourneysClient.trip`), else bahn.de.
 - `Transit/RISRouting/RISRoutingProvider.swift` – journeys from DB's own routing first, as in the DB Navigator
-  (RIS::Routing, `verkehrslage.bahnhof.de/api/routing/multimodal`, no key, undocumented). Stops by EVA number
+  (RIS::Routing, `verkehrslage.db.info/api/routing/multimodal`, no key, undocumented). Stops by EVA number
   (own, offline list incl. a multi-level station's main one, else a bahn.de hit with the very same name; never the
   nearest: a bus stop's would be a railway station nearby), source `.bahnDe`: its journey IDs are bahn.de's, so `trip(id:)` reads bahn.de's
   journey details through our server. Lines named like Transitous ("RE2 (29542)", "S5"). No board.

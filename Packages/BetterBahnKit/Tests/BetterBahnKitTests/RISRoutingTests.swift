@@ -145,14 +145,14 @@ import Testing
         #expect(page.source == .bahnDe)
         #expect(page.journeys.first?.legs.first?.line?.name == "ICE 1005")
         #expect(page.laterCursor == "bahnDe:3|OF|later")
-        #expect(RISFallbackProtocol.requests.withLock { $0.contains { $0.contains("verkehrslage.bahnhof.de") } })
+        #expect(RISFallbackProtocol.requests.withLock { $0.contains { $0.contains("verkehrslage.db.info") } })
 
         RISFallbackProtocol.requests.withLock { $0 = [] }
         var next = JourneyQuery(from: berlin, to: munich, date: try date("2026-11-04T07:00:00Z"))
         next.cursor = page.laterCursor
         let later = try await combined.journeys(next)
         #expect(later.source == .bahnDe)
-        #expect(RISFallbackProtocol.requests.withLock { $0.allSatisfy { $0.contains("verkehrslage.bahnhof.de") } })
+        #expect(RISFallbackProtocol.requests.withLock { $0.allSatisfy { $0.contains("verkehrslage.db.info") } })
     }
 
     func dbFirst(risEmpty: Bool = false, bahnDeHits: String = "[]") -> (CombinedProvider, URLSession) {
@@ -184,7 +184,7 @@ import Testing
         defer { session.invalidateAndCancel() }
         _ = try? await combined.journeys(JourneyQuery(from: berlin, to: munich, date: try date("2026-11-04T07:00:00Z")))
         let requests = DBFirstProtocol.requests.withLock { $0 }
-        #expect(requests.contains { $0.contains("verkehrslage.bahnhof.de") })
+        #expect(requests.contains { $0.contains("verkehrslage.db.info") })
         #expect(requests.contains { $0.contains("api.transitous.org") })
     }
 
@@ -196,7 +196,7 @@ import Testing
             try await combined.journeys(JourneyQuery(from: berlin, to: munich, date: try date("2026-11-04T07:00:00Z")))
         }
         let requests = DBFirstProtocol.requests.withLock { $0 }
-        #expect(requests.filter { $0.contains("verkehrslage.bahnhof.de") }.count == 1)
+        #expect(requests.filter { $0.contains("verkehrslage.db.info") }.count == 1)
     }
 
     /// A stop without an EVA number goes to Transitous: bahn.de's nearest hit could be a railway station
@@ -207,7 +207,7 @@ import Testing
         let busStop = Station(id: "de-DELFI_de:00000:99", name: "Somewhere Marktplatz", coordinate: nil, evaNumber: nil, source: .transitous)
         _ = try? await combined.journeys(JourneyQuery(from: busStop, to: munich, date: try date("2026-11-04T07:00:00Z")))
         let requests = DBFirstProtocol.requests.withLock { $0 }
-        #expect(!requests.contains { $0.contains("verkehrslage.bahnhof.de") })
+        #expect(!requests.contains { $0.contains("verkehrslage.db.info") })
         #expect(requests.contains { $0.contains("api.transitous.org") })
     }
 
@@ -233,7 +233,7 @@ private final class DBFirstProtocol: URLProtocol, @unchecked Sendable {
         Self.requests.withLock { $0.append(url.absoluteString) }
         var status = 503
         var body = Data()
-        if url.host() == "verkehrslage.bahnhof.de" {
+        if url.host() == "verkehrslage.db.info" {
             status = 200
             if Self.risEmpty.withLock({ $0 }) {
                 body = Data(#"{"trips": []}"#.utf8)
@@ -262,7 +262,7 @@ private final class RISFallbackProtocol: URLProtocol, @unchecked Sendable {
         Self.requests.withLock { $0.append(url.absoluteString) }
         var status = 503
         var body = Data()
-        if url.host() == "verkehrslage.bahnhof.de",
+        if url.host() == "verkehrslage.db.info",
            let fixture = Bundle.module.url(forResource: "ris-routing-multimodal", withExtension: "json", subdirectory: "Fixtures"),
            let data = try? Data(contentsOf: fixture) {
             status = 200

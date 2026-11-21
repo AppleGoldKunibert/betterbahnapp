@@ -1,7 +1,8 @@
 import Foundation
 
 /// Journeys from DB's own routing (RIS::Routing, DB's HAFAS behind it, as in the DB Navigator), as the
-/// "Verkehrslage" page on bahnhof.de asks it: no key, undocumented. `CombinedProvider` asks it first for
+/// "Verkehrslage" page on bahnhof.de asks it (at `verkehrslage.db.info`, since Nov 2026; the old host
+/// `verkehrslage.bahnhof.de` answers 500): no key, undocumented. `CombinedProvider` asks it first for
 /// journeys (`dbJourneys`) and Transitous when it finds none, fails or a stop has no EVA number for it,
 /// and it is the fallback for everything else while Transitous fails (`CombinedProvider.fallback`). Compared on the same routes (Nov 2026), long-distance trains in Germany
 /// matched Transitous exactly; RIS named trains abroad as DB does ("RJ 385", where Transitous says
@@ -12,7 +13,7 @@ import Foundation
 /// `.bahnDe`, stations their EVA number as ID, and a trip comes from bahn.de through our server.
 /// Stations are searched at bahn.de too. There is no board: bahn.de's carries too little for one.
 public struct RISRoutingProvider: TransitProvider {
-    public static let baseURL = URL(string: "https://verkehrslage.bahnhof.de/api/routing/")!
+    public static let baseURL = URL(string: "https://verkehrslage.db.info/api/routing/")!
     /// RIS::Routing's own limit on the website; more transfers aren't searched.
     static let maxChanges = 5
 
