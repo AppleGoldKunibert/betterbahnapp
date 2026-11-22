@@ -11,106 +11,6 @@
         }
       }
     },
-    "Extra-Features" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Extra features"
-          }
-        }
-      }
-    },
-    "Verbindungen zu einem zweiten Ziel in derselben Liste suchen." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Search connections to a second destination in the same list."
-          }
-        }
-      }
-    },
-    "Diese Funktionen sind zuerst aus. Schalte ein, was du brauchst." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "These features start switched off. Turn on what you need."
-          }
-        }
-      }
-    },
-    "Alternatives Ziel" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Alternative destination"
-          }
-        }
-      }
-    },
-    "Alternatives Ziel entfernen" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Remove alternative destination"
-          }
-        }
-      }
-    },
-    "Anderer Bahnhof" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Another station"
-          }
-        }
-      }
-    },
-    "Nach %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "To %@"
-          }
-        }
-      }
-    },
-    "oder %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "or %@"
-          }
-        }
-      }
-    },
-    "Oder nach" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Or to"
-          }
-        }
-      }
-    },
-    "Verbindungen zu beiden Zielen erscheinen in einer Liste." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Connections to both destinations appear in one list."
-          }
-        }
-      }
-    },
     "·" : {
       "localizations" : {
         "en" : {
@@ -1464,6 +1364,16 @@
         }
       }
     },
+    "Abfahrtstafeln, Echtzeitdaten und Meldungen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Departure boards, live data and messages"
+          }
+        }
+      }
+    },
     "Abgelaufen" : {
       "localizations" : {
         "en" : {
@@ -1766,6 +1676,26 @@
         }
       }
     },
+    "Alternatives Ziel" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alternative destination"
+          }
+        }
+      }
+    },
+    "Alternatives Ziel entfernen" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remove alternative destination"
+          }
+        }
+      }
+    },
     "Am längsten gewartet: %@ mit +%lld min" : {
       "localizations" : {
         "en" : {
@@ -1964,6 +1894,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Choose Another Train"
+          }
+        }
+      }
+    },
+    "Anderer Bahnhof" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Another station"
           }
         }
       }
@@ -2602,6 +2542,16 @@
         }
       }
     },
+    "Bahnhofssuche, Wagenreihung, Zusatzhalte, Gleise und Zugnamen; Zeichnungen der ICE-Baureihen aus dem Fahrzeuglexikon, © Deutsche Bahn AG" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Station search, coach sequence, extra stops, platforms and train names; drawings of the ICE series from the Fahrzeuglexikon, © Deutsche Bahn AG"
+          }
+        }
+      }
+    },
     "Bahnhofstafel" : {
       "localizations" : {
         "en" : {
@@ -2890,6 +2840,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Bus, Tram & Co."
+          }
+        }
+      }
+    },
+    "Busse und Bahnen auf den Abfahrtstafeln" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Buses, trams and subways on departure boards"
           }
         }
       }
@@ -3462,6 +3422,16 @@
         }
       }
     },
+    "Diese Funktionen sind zuerst aus. Schalte ein, was du brauchst." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "These features start switched off. Turn on what you need."
+          }
+        }
+      }
+    },
     "Diese Tags schlagen wir dir beim Einchecken vor." : {
       "localizations" : {
         "en" : {
@@ -3737,26 +3707,6 @@
         }
       }
     },
-    "Busse und Bahnen auf den Abfahrtstafeln" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Buses, trams and subways on departure boards"
-          }
-        }
-      }
-    },
-    "Abfahrtstafeln, Echtzeitdaten und Meldungen" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Departure boards, live data and messages"
-          }
-        }
-      }
-    },
     "Eigene" : {
       "localizations" : {
         "en" : {
@@ -3985,6 +3935,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Expert Mode"
+          }
+        }
+      }
+    },
+    "Extra-Features" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Extra features"
           }
         }
       }
@@ -6183,6 +6143,16 @@
         }
       }
     },
+    "Nach %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "To %@"
+          }
+        }
+      }
+    },
     "nach %@, frühestens %@" : {
       "localizations" : {
         "en" : {
@@ -6491,6 +6461,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Trains Only"
+          }
+        }
+      }
+    },
+    "oder %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "or %@"
+          }
+        }
+      }
+    },
+    "Oder nach" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Or to"
           }
         }
       }
@@ -8506,6 +8496,26 @@
         }
       }
     },
+    "Verbindungen zu beiden Zielen erscheinen in einer Liste." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connections to both destinations appear in one list."
+          }
+        }
+      }
+    },
+    "Verbindungen zu einem zweiten Ziel in derselben Liste suchen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Search connections to a second destination in the same list."
+          }
+        }
+      }
+    },
     "Verbindungen, Abfahrten und Bahnhofssuche, wo die Bahn keine Daten hat" : {
       "localizations" : {
         "en" : {
@@ -8764,16 +8774,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Show Coach Sequence"
-          }
-        }
-      }
-    },
-    "Bahnhofssuche, Wagenreihung, Zusatzhalte, Gleise und Zugnamen; Zeichnungen der ICE-Baureihen aus dem Fahrzeuglexikon, © Deutsche Bahn AG" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Station search, coach sequence, extra stops, platforms and train names; drawings of the ICE series from the Fahrzeuglexikon, © Deutsche Bahn AG"
           }
         }
       }
@@ -9281,7 +9281,11 @@
         }
       }
     },
+    "Zeigt Züge aus allen Ländern, die bahn.expert kennt." : {
+
+    },
     "Zeigt Züge aus allen Ländern, die die Deutsche Bahn kennt." : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
