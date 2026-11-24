@@ -6,13 +6,24 @@ nonisolated struct SavedTicket: Codable, Hashable, Identifiable {
     var ticket: DBTicket
     /// `SavedJourney.id` (nil if no saved journey matched).
     var journeyID: UUID?
+    /// The last name the order was looked up with, so the Komfort-Check-in can open it again (#605).
+    var lastName: String?
 
     var id: String { ticket.id }
 }
 
+/// A train of a saved ticket whose Komfort-Check-in the app offers (#605).
+nonisolated struct KomfortCheckinTarget: Identifiable, Hashable {
+    var ticket: SavedTicket
+    var leg: KomfortCheckin.Leg
+
+    var id: String { ticket.id + "-\(leg.index)" }
+}
+
 /// Tickets stay on this device only: unlike saved journeys they're never mirrored to iCloud, and
-/// the files are encrypted while the device is locked. The order number and name aren't kept at
-/// all – bahn.de's own page asks for them each time.
+/// the files are encrypted while the device is locked. The last name the order was looked up with
+/// and the BahnCard number for the Komfort-Check-in stay here too, so the check-in on the train
+/// doesn't ask for them again.
 nonisolated enum TicketStore {
     private static var directory: URL {
         let url = URL.applicationSupportDirectory.appending(path: "BetterBahn/Tickets", directoryHint: .isDirectory)
@@ -22,6 +33,19 @@ nonisolated enum TicketStore {
 
     private static var listFile: URL { directory.appending(path: "tickets.json") }
     private static var passesFile: URL { directory.appending(path: "passes.json") }
+    private static var bahnCardFile: URL { directory.appending(path: "bahncard.txt") }
+
+    /// The BahnCard number last used for a Komfort-Check-in.
+    static var bahnCardNumber: String? {
+        get { (try? String(contentsOf: bahnCardFile, encoding: .utf8)).flatMap { $0.isEmpty ? nil : $0 } }
+        set {
+            guard let newValue, !newValue.isEmpty else {
+                try? FileManager.default.removeItem(at: bahnCardFile)
+                return
+            }
+            try? Data(newValue.utf8).write(to: bahnCardFile, options: [.atomic, .completeFileProtection])
+        }
+    }
 
     private static func pdfFile(_ id: String) -> URL {
         directory.appending(path: id.filter { $0.isLetter || $0.isNumber || $0 == "-" } + ".pdf")
@@ -75,7 +99,7 @@ extension AppModel {
     /// Reads an order fetched on bahn.de's page, links each ticket to the saved journey it was
     /// booked for (saving the booked connection when there's none yet) and keeps it on this device.
     /// Returns the tickets in order; `journeyID` is nil where the connection couldn't be found.
-    func importTickets(_ result: DBOrderPage.Result, orderNumber: String) async throws -> [SavedTicket] {
+    func importTickets(_ result: DBOrderPage.Result, orderNumber: String, lastName: String? = nil) async throws -> [SavedTicket] {
         let order = result.order, pdfs = result.pdfs
         // Rendering and scanning the PDFs takes a moment, so it runs off the main thread.
         let fetched = try await Task.detached(priority: .userInitiated) {
@@ -95,7 +119,7 @@ extension AppModel {
                 journeyIDs[ticket.direction] = .some(journeyID)
             }
             if let pdf = pdfs[ticket.bundleID] { TicketStore.savePDF(pdf, for: ticket.id) }
-            imported.append(SavedTicket(ticket: ticket, journeyID: journeyID))
+            imported.append(SavedTicket(ticket: ticket, journeyID: journeyID, lastName: lastName))
         }
         let ids = Set(imported.map(\.id))
         tickets = tickets.filter { !ids.contains($0.id) } + imported
@@ -125,6 +149,38 @@ extension AppModel {
         #endif
         guard let entry = savedEntry(for: journey) else { return nil }
         return reservations(for: entry).first { $0.matches(leg) }
+    }
+
+    // MARK: Komfort-Check-in
+
+    /// The Komfort-Check-in for the train `leg` rides, from the journey's tickets (a full ticket
+    /// before a reservation of its own).
+    func komfortCheckin(for leg: Leg, in journey: Journey) -> KomfortCheckinTarget? {
+        guard let entry = savedEntry(for: journey) else { return nil }
+        let candidates = tickets(for: entry).filter { !$0.ticket.isPartnerDocument }
+            .sorted { !$0.ticket.isReservationOnly && $1.ticket.isReservationOnly }
+        for saved in candidates {
+            if let checkin = saved.ticket.komfortCheckin?.leg(for: leg) { return KomfortCheckinTarget(ticket: saved, leg: checkin) }
+        }
+        return nil
+    }
+
+    /// The ticket's trains with a Komfort-Check-in.
+    func komfortCheckins(forTicket id: String) -> [KomfortCheckinTarget] {
+        guard let saved = tickets.first(where: { $0.id == id }), !saved.ticket.isPartnerDocument else { return [] }
+        return (saved.ticket.komfortCheckin?.legs ?? []).map { KomfortCheckinTarget(ticket: saved, leg: $0) }
+    }
+
+    /// `target` as currently saved (its status may have changed since it was made).
+    func current(_ target: KomfortCheckinTarget) -> KomfortCheckinTarget {
+        komfortCheckins(forTicket: target.ticket.id).first { $0.leg.index == target.leg.index } ?? target
+    }
+
+    /// Keeps the status bahn.de answered a check-in with, and the name it was made with.
+    func updateKomfortCheckin(_ target: KomfortCheckinTarget, status: KomfortCheckin.Status, lastName: String) {
+        guard let position = tickets.firstIndex(where: { $0.id == target.ticket.id }) else { return }
+        tickets[position].ticket.updateKomfortCheckin(legIndex: target.leg.index, status: status)
+        tickets[position].lastName = lastName
     }
 
     func removeTicket(_ ticket: SavedTicket) {
