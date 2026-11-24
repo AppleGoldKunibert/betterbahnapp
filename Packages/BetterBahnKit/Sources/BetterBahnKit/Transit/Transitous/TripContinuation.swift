@@ -44,7 +44,8 @@ extension TransitousProvider {
     /// `directionBeyondBorder(of:)` for the legs of a search, which only know their trip's last stop (`tripTo`),
     /// by trip ID. All within `borderDirectionDeadline`, so a search isn't held up; past it none, and the
     /// lookups still finish for the next search.
-    func directionsBeyondBorder(of legs: [MLeg]) async -> [String: String] {
+    /// - Parameter deadline: longer in tests, whose runner can be too busy to answer even a mock within the usual one.
+    func directionsBeyondBorder(of legs: [MLeg], deadline: Duration = borderDirectionDeadline) async -> [String: String] {
         var ends: [String: (line: Line, number: String, stopId: String, arrival: Date)] = [:]
         for leg in legs where !leg.isWalking {
             let line = leg.lineInfo.toLine()
@@ -54,7 +55,7 @@ extension TransitousProvider {
         }
         guard !ends.isEmpty else { return [:] }
         let trips = ends
-        return (try? await CombinedProvider.withDeadline(Self.borderDirectionDeadline) { [self] in
+        return (try? await CombinedProvider.withDeadline(deadline) { [self] in
             await withTaskGroup(of: (String, String?).self) { group in
                 for (id, end) in trips {
                     group.addTask {

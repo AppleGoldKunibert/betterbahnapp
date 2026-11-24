@@ -1482,7 +1482,8 @@ func station(_ id: String, _ name: String, _ lat: Double? = nil, _ lon: Double? 
         let session = URLSession(configuration: config)
         defer { session.invalidateAndCancel() }
         let provider = TransitousProvider(http: HTTPClient(session: session))
-        let directions = await provider.directionsBeyondBorder(of: legs)
+        // A deadline the busy CI runner can't miss: the mock answers at once, the usual 2 s only time the runner.
+        let directions = await provider.directionsBeyondBorder(of: legs, deadline: .seconds(120))
         #expect(directions == ["20261027_11:44_de-DELFI_3448697619": "Warszawa Wschodnia"])
         // One request for the train; a German one is left alone, and the answer is remembered.
         #expect(RzepinStopTimesProtocol.requests.withLock { $0 } == 1)
