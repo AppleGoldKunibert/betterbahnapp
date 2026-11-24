@@ -270,6 +270,32 @@ import Testing
         #expect(StatsWorkerProtocol.requests.count == 1)
     }
 
+    @Test func keepsNothingWhenSwitchedOffDuringALookup() async {
+        StatsWorkerProtocol.reset(status: 200)
+        let file = FileManager.default.temporaryDirectory.appending(path: "TrainStatistics-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: file) }
+        let client = client()
+        let holder = Mutex<TrainStatisticsStore?>(nil)
+        let store = TrainStatisticsStore(cacheURL: file) { queries in
+            let answers = try await client.statistics(for: queries)
+            // The user turns the statistics off while the request is still running.
+            await holder.withLock { $0 }?.setEnabled(false)
+            return answers
+        }
+        holder.withLock { $0 = store }
+        await store.setEnabled(true)
+        let abroad = Station(id: "at-somewhere", name: "Irgendwo", coordinate: nil, evaNumber: nil, source: .transitous)
+        #expect(await store.lookup(line: line, at: [fulda, abroad], on: date) { _ in "8100001" } == nil)
+        #expect(StatsWorkerProtocol.requests.count == 1)
+        #expect(!FileManager.default.fileExists(atPath: file.path))
+
+        // Switched on again the same day: nothing left over, the server is asked again.
+        await store.setEnabled(true)
+        #expect(store.cachedLookup(line: line, at: [fulda, abroad], on: date) == nil)
+        #expect(store.cached(TrainStatisticsQuery(category: "ICE", number: "1095", evas: ["8000115", "8100001"]),
+                             day: TrainStatisticsStore.day(of: date)) == nil)
+    }
+
     @Test func waitsBeforeAskingAgainAfterAFailure() async {
         StatsWorkerProtocol.reset(status: 503)
         let clock = Mutex(Date(timeIntervalSince1970: 1_000_000))
