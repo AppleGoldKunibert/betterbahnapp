@@ -1,0 +1,82 @@
+{
+ "entries": [
+  {
+   "zeit": "2026-12-13T17:33:00",
+   "journeyId": "2|#VN#1#ST#1794414137#PI#1#ZI#195259#TA#12#DA#131226#1S#8002549#1T#1733#LS#8000238#LT#1824#PU#81#RT#1#CA#DRE#ZE#81633#ZB#            81633#PC#3#FR#8002549#FT#1733#TO#8000238#TT#1824#",
+   "verkehrmittel": {
+    "name": "81633",
+    "linienNummer": "RB31",
+    "kurzText": "ME",
+    "mittelText": "RB31",
+    "langText": "RB31 (81633)",
+    "produktGattung": "REGIONAL"
+   },
+   "terminus": "Lüneburg"
+  },
+  {
+   "zeit": "2026-12-13T17:34:00",
+   "journeyId": "2|#VN#1#ST#1794414137#PI#1#ZI#134472#TA#9#DA#131226#1S#8002549#1T#1734#LS#8000237#LT#1824#PU#81#RT#1#CA#NRE#ZE#11476#ZB#            11476#PC#3#FR#8002549#FT#1734#TO#8000237#TT#1824#",
+   "verkehrmittel": {
+    "name": "11476",
+    "linienNummer": "RE80",
+    "kurzText": "RE",
+    "mittelText": "RE80",
+    "langText": "RE80 (11476)",
+    "produktGattung": "REGIONAL"
+   },
+   "terminus": "Lübeck Hbf"
+  },
+  {
+   "zeit": "2026-12-13T17:34:00",
+   "journeyId": "2|#VN#1#ST#1794414137#PI#1#ZI#140653#TA#5#DA#131226#1S#8001007#1T#1707#LS#8002547#LT#1759#PU#81#RT#1#CA#DBS#ZE#S1#ZB#               S1#PC#4#FR#8001007#FT#1707#TO#8002547#TT#1759#",
+   "verkehrmittel": {
+    "name": "S1",
+    "linienNummer": "S1",
+    "kurzText": "S",
+    "mittelText": "S1",
+    "langText": "S1",
+    "produktGattung": "SBAHN"
+   },
+   "terminus": "Hamburg Airport"
+  },
+  {
+   "zeit": "2026-12-13T17:34:00",
+   "journeyId": "2|#VN#1#ST#1794414137#PI#1#ZI#140698#TA#8#DA#131226#1S#8098553#1T#1722#LS#8002554#LT#1755#PU#81#RT#1#CA#DBS#ZE#S2#ZB#               S2#PC#4#FR#8098553#FT#1722#TO#8002554#TT#1755#",
+   "verkehrmittel": {
+    "name": "S2",
+    "linienNummer": "S2",
+    "kurzText": "S",
+    "mittelText": "S2",
+    "langText": "S2",
+    "produktGattung": "SBAHN"
+   },
+   "terminus": "Hamburg-Bergedorf"
+  },
+  {
+   "zeit": "2026-12-13T17:34:00",
+   "journeyId": "2|#VN#1#ST#1794414137#PI#1#ZI#150011#TA#0#DA#131226#1S#8002553#1T#1718#LS#5400014#LT#2337#PU#81#RT#1#CA#RJ#ZE#179#ZB#RJ            179#PC#0#FR#8002553#FT#1718#TO#5400014#TT#2337#",
+   "verkehrmittel": {
+    "name": "RJ 179",
+    "linienNummer": "27",
+    "kurzText": "RJ",
+    "mittelText": "RJ 179",
+    "langText": "RJ 179",
+    "produktGattung": "ICE"
+   },
+   "terminus": "Praha hl.n."
+  },
+  {
+   "zeit": "2026-12-13T17:36:00",
+   "journeyId": "2|#VN#1#ST#1794414137#PI#1#ZI#140724#TA#38#DA#131226#1S#8002557#1T#1708#LS#8004819#LT#1813#PU#81#RT#1#CA#DBS#ZE#S3#ZB#               S3#PC#4#FR#8002557#FT#1708#TO#8004819#TT#1813#",
+   "verkehrmittel": {
+    "name": "S3",
+    "linienNummer": "S3",
+    "kurzText": "S",
+    "mittelText": "S3",
+    "langText": "S3",
+    "produktGattung": "SBAHN"
+   },
+   "terminus": "Pinneberg"
+  }
+ ]
+}

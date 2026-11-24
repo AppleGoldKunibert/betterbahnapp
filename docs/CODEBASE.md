@@ -646,7 +646,7 @@ in `project.pbxproj`: new files join their target automatically.
   booked plan, `bookedPlan`; after a replan also "Gefahrene Züge").
 - `Sharing/` – `JourneyShareLink` (encoding, payload limits, short IDs; the shared copy, `Journey.forSharing`, gets every station's EVA number from `StationNames` (the share page's live times ask IRIS by it) and DB's names (`Station.displayName`, also for the direction)), `ShortShareLinkClient` (long link as
   fallback; `arrivalURL`), `ArrivalShare` (#317: last train from boarding to exit, bahn.de journey ID via
-  `BahnDeClient.journeyId(for:)`, EVA numbers), `DBShare` + `DBShareImporter` (DB Navigator/bahn.de shared text).
+  `BahnDeClient.journeyId(for:)`, EVA numbers), `DBShare` + `DBShareImporter` (DB Navigator/bahn.de shared text: a search at the shared times, else train by train from Transitous' boards; a train Transitous lacks, e.g. after the timetable change before DELFI has the new year (#578), comes from bahn.de's board and `fahrt` (`BahnDeClient.sharedLeg`), else as the share describes it (`plainLeg`); only "not known there" moves on, no answer at all (offline, server down) fails the import (`unlessUnknown`); such legs have no trip ID, refresh through DB Timetables/`LiveRun`, and the leg's trip view shows their saved stops).
 - `Widgets/` – `WidgetSnapshot` + `WidgetStore` (App Group JSON), `JourneyWidgetState` (phase, next stop and delay,
   transfer, countdown; `changeDates`), `WidgetTimer` (> 12 h reads "2d 3h 49m"), `TrainMapLink` (`betterbahn://map`),
   `WidgetStations` (favourites + recent routes for the board widget's picker), `BoardWidgetLink` (`betterbahn://board`,

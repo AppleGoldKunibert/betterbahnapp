@@ -908,7 +908,7 @@ extension BahnDeClient {
     }
 
     /// Same place test as `stop(in:at:planned:side:)`, without the time.
-    private static func isNear(_ stop: JourneyStop, _ station: Station) -> Bool {
+    static func isNear(_ stop: JourneyStop, _ station: Station) -> Bool {
         if matches(stop, station) || Station.normalize(stop.name) == Station.normalize(station.displayName) { return true }
         guard let a = stop.coordinate, let b = station.coordinate else { return false }
         return a.distance(to: b) < 1_000
