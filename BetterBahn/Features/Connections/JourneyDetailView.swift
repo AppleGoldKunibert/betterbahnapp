@@ -201,6 +201,7 @@ struct JourneyDetailView: View {
                             ? model.checkinStatusIDs[leg.id].map { id -> () -> Void in { shownCheckin = ShownCheckin(leg: leg, statusId: id) } }
                             : nil,
                         reservation: model.reservation(for: leg, in: journey),
+                        komfortCheckin: model.komfortCheckin(for: leg, in: journey),
                         savesSeat: !readOnly,
                         coachAdvice: coachAdvice[leg.id],
                         // Next to the transfer when there is one.
@@ -833,6 +834,8 @@ struct LegCard: View {
     var onShowCheckin: (() -> Void)?
     /// The seat reserved on this train (from the journey's ticket), if any.
     var reservation: SeatReservation?
+    /// The Komfort-Check-in on this train from the journey's ticket (#605), shown while it's open.
+    var komfortCheckin: KomfortCheckinTarget?
     /// Offers saving your own seat on the way when there's no reservation (#410).
     var savesSeat = false
     /// Where to board for a quick transfer or exit (#383): its coaches are marked in the Wagenreihung.
@@ -1034,6 +1037,9 @@ struct LegCard: View {
 
                 if let reservation {
                     ReservationRow(reservation: reservation, request: BahnDeClient.formationRequest(for: leg))
+                }
+                if let komfortCheckin {
+                    KomfortCheckinRow(target: komfortCheckin)
                 }
 
                 if let bikeMode, !leg.cancelled {

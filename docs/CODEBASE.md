@@ -92,7 +92,10 @@ in `project.pbxproj`: new files join their target automatically.
   `TraewellingClient.KeepAlive`). Logout ends the login there (offline: later, `pendingLogouts`).
 - `App/TicketStore.swift` – `SavedTicket` (`DBTicket` + its `SavedJourney.id`), only on this device in
   `Application Support/BetterBahn/Tickets/` (list + PDFs, file protection, **not** synced). `importTickets` matches
-  a saved journey or imports the booking via `DBShareImporter.journey(from:)`.
+  a saved journey or imports the booking via `DBShareImporter.journey(from:)`. Also keeps the lookup's last name
+  (`SavedTicket.lastName`) and the BahnCard number (`TicketStore.bahnCardNumber`, `bahncard.txt`) for the
+  Komfort-Check-in (#605): `komfortCheckin(for:in:)` (LegCard), `komfortCheckins(forTicket:)` (TicketView),
+  `updateKomfortCheckin`.
 - `App/LiveActivityManager.swift` – ActivityKit wrapper; attributes in Kit `TripActivityAttributes`; `alert` lights up the running activity (only the
   `ActivityAttributes` conformance is iOS-only, so Kit tests cover `ContentState.from`). With Settings → Mitteilungen
   "Live-Aktivität über Server aktualisieren" (`AppSettings.liveActivityServerUpdates`, on by default) activities start
@@ -231,12 +234,15 @@ in `project.pbxproj`: new files join their target automatically.
   ("Fahrten" on top) open "Meine" (own rides, which open their journey) and "Alle" (`TzLogClient.history(of:)`: today,
   then each day of the last year, from the server's Tz log); a run opens its Zuglauf (`TzTrainRunView`: found by number on that day like in the train search, shown as `TrainSearchResultView`; days DB no longer has say so).
 - `Features/Tickets/` – `TicketLookupView` (bahn.de's "Auftragssuche" in a hidden SwiftUI `WebView`:
-  `DBOrderPage.fillScript` fills the form, `fetchScript` fetches order + PDFs inside the page; shown only when bahn.de
+  `DBOrderPage.fillScript` fills the form (`WebPage.submitOrderSearch`), `fetchScript` fetches order + PDFs inside the page; shown only when bahn.de
   asks for more, e.g. a captcha), `TicketView` (full-brightness barcode, PDF, `AddToWalletButton`, "Zugbindung
   aufgehoben"), `TicketButton` (in `JourneyDetailView` once the journey has tickets), `AddTicketButton`,
   `TicketsListView` (Settings → Ticket & Reise → Gespeicherte Tickets; "Zeitkarten" like the Deutschland-Ticket from a screenshot via
   `PhotosPicker`, `TravelPassView`), `SeatReservationViews` (`ReservationRow` in `LegCard`;
   `AppModel.reservations(for:)`, only on the leg whose train matches; `SaveSeatButton`/`SaveSeatSheet`, #410).
+  `KomfortCheckinViews` (#605): `KomfortCheckinRow` in `LegCard` and `TicketView` while the train's check-in is open
+  ("Einchecken", then "Eingecheckt: Wagen …" and "Umchecken"); `KomfortCheckinView` opens the order like
+  `TicketLookupView` (hidden `WebView`, page shown for a captcha) and sends `DBOrderPage.checkinScript` from it.
   `TicketFace` (#504) lays out `TicketView` and `TravelPassView` in both designs: Minimal barcode plus a details
   `Card`; Fahrkarte one ticket (`ticketBackground()`) with the barcode between two `TicketPerforation`s and the
   `TicketDetail`s as `TicketFieldLabel` capitals over their values.
@@ -631,7 +637,11 @@ in `project.pbxproj`: new files join their target automatically.
   Vision; take the Aztec's original bytes from the PDF, Vision's `payloadData` is the internal encoding),
   `WalletPassPayload` + `WalletPassClient`, `UICBarcode` (FCB 3 via a minimal unaligned-PER reader; signer answers 422
   → `WalletPassError.unverifiedBarcode`), `TravelPass` (Zeitkarte, only barcode bytes kept, `passes.json`). No direct
-  order API client: bahn.de blocks it outside its page.
+  order API client: bahn.de blocks it outside its page. `KomfortCheckin` (#605): `DBTicket.komfortCheckin` from the
+  order's `verbindung.tripUUID` and each section's `checkinStatus` (`idx` = `legIdx`); `Leg.isOpen(at:)` (from
+  `kciMoeglichAb` until arrival), `request(for:…)` builds `POST /web/api/ticket/kci` (`mitSitzplatzwechsel` when
+  already checked in or not on the reserved seat; `bahncardNumber` only for BahnCard bookings,
+  `needsBahnCardForCheckin`), sent by `DBOrderPage.checkinScript`, answer read by `checkinStatus(from:)`.
 - `Tickets/PassengerRights.swift` (#311) – `PassengerRights.claim(for:earlierPlans:hasTicket:hasBahnCard100:)`: delay
   at the destination against the first booked plan (`previousVersions`), 25 % from 60 min, 50 % from 120; only with a
   ticket, BahnCard 100 or a long-distance train; `requestFields` for DB's form (day, departure and trains of the
