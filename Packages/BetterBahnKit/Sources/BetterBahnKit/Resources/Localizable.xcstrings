@@ -6918,6 +6918,23 @@
           }
         }
       }
+    },
+    "Wagen %@, Platz %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wagen %@, Platz %@"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Coach %@, Seat %@"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

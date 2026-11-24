@@ -99,6 +99,64 @@ public enum DBOrderPage {
         }
         """
 
+    /// Body of an async JavaScript function taking `body` (a `KomfortCheckin.Request` as JSON): checks
+    /// in with the page's session, the same request bahn.de's own check-in page sends. Returns
+    /// `{state, status?, response?}`; `response` is bahn.de's new check-in status.
+    public static let checkinScript = """
+        try {
+            const vuex = JSON.parse(sessionStorage.getItem('vuex') || '{}');
+            const token = vuex?.tokenState?.auftragAuthenticationToken?.accessToken;
+            if (!token) return { state: 'noToken' };
+            const response = await fetch('/web/api/ticket/kci', {
+                method: 'POST',
+                headers: {
+                    Authorization: 'Bearer ' + token,
+                    Accept: 'application/json',
+                    'Content-Type': 'application/json; charset=UTF-8',
+                },
+                body,
+            });
+            const text = await response.text();
+            if (!response.ok) return { state: 'error', status: response.status, response: text };
+            return { state: 'ok', response: text };
+        } catch (e) {
+            return { state: 'error', status: 0, message: String(e) };
+        }
+        """
+
+    /// Reads what `checkinScript` returned: the train's new check-in status.
+    public static func checkinStatus(from value: Any?) throws -> KomfortCheckin.Status {
+        guard let dictionary = value as? [String: Any], let state = dictionary["state"] as? String else {
+            throw Failure.unreadable
+        }
+        switch state {
+        case "ok":
+            guard let data = (dictionary["response"] as? String)?.data(using: .utf8),
+                  let status = try? KomfortCheckin.status(from: data) else { throw Failure.unreadable }
+            return status
+        case "noToken":
+            throw Failure.notReady
+        default:
+            let status = (dictionary["status"] as? NSNumber)?.intValue ?? 0
+            let message = (dictionary["response"] as? String).flatMap { checkinErrorMessage(in: Data($0.utf8)) }
+            if let message { throw Failure.checkinRefused(message) }
+            switch status {
+            case 401: throw Failure.notFound
+            case 403, 429: throw Failure.blocked
+            default: throw Failure.http(status)
+            }
+        }
+    }
+
+    /// The text of a bahn.de error answer, if it has one meant for travellers.
+    static func checkinErrorMessage(in data: Data) -> String? {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        let candidates = [object["fehlertext"], object["message"], object["detail"], object["title"],
+                          (object["fehler"] as? [String: Any])?["text"]]
+        return candidates.compactMap { ($0 as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty && $0.count < 300 }
+    }
+
     public enum Failure: Error, Sendable, Equatable, LocalizedError {
         /// The page hasn't finished opening the order yet.
         case notReady
@@ -106,6 +164,8 @@ public enum DBOrderPage {
         case notFound
         case http(Int)
         case unreadable
+        /// bahn.de turned the Komfort-Check-in down with this reason.
+        case checkinRefused(String)
 
         public var errorDescription: String? {
             switch self {
@@ -114,6 +174,7 @@ public enum DBOrderPage {
             case .notFound: String(kit: "Zu dieser Auftragsnummer und diesem Namen wurde keine Buchung gefunden.")
             case .http(let status): String(kit: "bahn.de hat mit einem Fehler geantwortet (%lld).", status)
             case .unreadable: String(kit: "Die Antwort von bahn.de konnte nicht gelesen werden.")
+            case .checkinRefused(let message): message
             }
         }
     }

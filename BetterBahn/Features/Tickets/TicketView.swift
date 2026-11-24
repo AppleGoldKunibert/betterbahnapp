@@ -18,7 +18,7 @@ struct TicketView: View {
             TabView(selection: $selection) {
                 ForEach(tickets) { saved in
                     ScrollView {
-                        TicketPage(ticket: saved.ticket, journey: journey)
+                        TicketPage(ticketID: saved.id, ticket: saved.ticket, journey: journey)
                             .padding()
                     }
                     .tag(Optional(saved.id))
@@ -40,8 +40,10 @@ struct TicketView: View {
 }
 
 private struct TicketPage: View {
+    let ticketID: String
     let ticket: DBTicket
     let journey: Journey?
+    @Environment(AppModel.self) private var model
     @State private var showPDF = false
 
     var body: some View {
@@ -61,6 +63,9 @@ private struct TicketPage: View {
                     barcode
                 }
             }
+
+            // Shown by each row only while the train's check-in is open.
+            ForEach(model.komfortCheckins(forTicket: ticketID)) { KomfortCheckinRow(target: $0) }
 
             if !ticket.isPartnerDocument {
                 VStack(spacing: 12) {
