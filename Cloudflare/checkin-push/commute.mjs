@@ -162,11 +162,16 @@ async function look(row, env, now, iris, apns) {
         if (now < firstDeparture(journey) - LOOK_BEFORE || now > lastArrival(journey) + LOOK_AFTER) continue;
         const live = await Promise.all(journey.legs.map(leg => liveLeg(leg, iris)));
         for (const alert of alerts(journey, live, now)) {
+            // A send that throws (APNs unreachable) counts as failed, so what was already sent in this look
+            // is still stored and not reported again (#599).
             const result = await apns.send(row.device_token, row.sandbox, payload(journey, alert, row.language), {
                 "apns-topic": env.APNS_TOPIC,
                 "apns-push-type": "alert",
                 "apns-priority": "10",
                 "apns-collapse-id": `commute-${journey.id}-${alert.key}`,
+            }).catch(error => {
+                console.log(`commute push failed: ${error?.message ?? error}`);
+                return "failed";
             });
             if (result === "gone") {
                 await env.DB.prepare("DELETE FROM commutes WHERE id = ?").bind(row.id).run();
