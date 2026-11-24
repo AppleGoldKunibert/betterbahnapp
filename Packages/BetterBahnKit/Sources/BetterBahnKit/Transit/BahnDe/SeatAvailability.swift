@@ -15,14 +15,30 @@ public struct SeatAvailability: Sendable, Hashable {
         public var isFree: Bool { self != .unavailable }
     }
 
+    /// A coach as the seat picker lists it: its number and DB's coach type ("I5812-412.(12-TLG.)-1"), which
+    /// `BahnDeClient.coachType(_:)` tells class and amenities of.
+    public struct Coach: Sendable, Hashable {
+        public var number: String
+        public var type: String?
+
+        public init(number: String, type: String? = nil) {
+            self.number = number
+            self.type = type
+        }
+    }
+
     /// Seat number → status, per coach number.
     public var coaches: [String: [String: Status]]
     /// bahn.de answered that nothing is left to reserve on this stretch in this class (409).
     public var bookedOut: Bool
+    /// The train's parts (one per trainset or coach set running as this train) with their coaches, as bahn.de lists
+    /// them: by number, not by where they stand. Only coaches with seats to reserve; empty when booked out.
+    public var parts: [[Coach]]
 
-    public init(coaches: [String: [String: Status]], bookedOut: Bool = false) {
+    public init(coaches: [String: [String: Status]], bookedOut: Bool = false, parts: [[Coach]] = []) {
         self.coaches = coaches
         self.bookedOut = bookedOut
+        self.parts = parts
     }
 
     public static let bookedOutAnswer = SeatAvailability(coaches: [:], bookedOut: true)
@@ -170,6 +186,9 @@ extension BahnDeClient {
         guard let data = try? JSONDecoder().decode(SeatPickerPage.self, from: Data(json.utf8)), data.type == "gsd",
               let parts = data.zugfahrt?.zugteile else { return nil }
         var coaches: [String: [String: SeatAvailability.Status]] = [:]
+        let listed = parts.map { part in
+            (part.wagen ?? []).compactMap { coach in coach.nummer.map { SeatAvailability.Coach(number: $0, type: coach.wagentyp) } }
+        }.filter { !$0.isEmpty }
         for coach in parts.flatMap({ $0.wagen ?? [] }) {
             guard let number = coach.nummer else { continue }
             var seats = coaches[number] ?? [:]
@@ -179,7 +198,7 @@ extension BahnDeClient {
             }
             coaches[number] = seats
         }
-        return coaches.isEmpty ? nil : SeatAvailability(coaches: coaches)
+        return coaches.isEmpty ? nil : SeatAvailability(coaches: coaches, parts: listed)
     }
 
     struct SeatPickerData: Encodable {
@@ -206,7 +225,7 @@ extension BahnDeClient {
     struct SeatPickerPage: Decodable {
         struct Journey: Decodable { var zugteile: [Part]? }
         struct Part: Decodable { var wagen: [Coach]? }
-        struct Coach: Decodable { var nummer: String?; var plaetze: [Seat]? }
+        struct Coach: Decodable { var nummer: String?; var wagentyp: String?; var plaetze: [Seat]? }
         struct Seat: Decodable { var nummer: String?; var status: Int? }
 
         var type: String?

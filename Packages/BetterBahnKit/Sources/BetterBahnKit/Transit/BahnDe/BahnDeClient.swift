@@ -261,9 +261,16 @@ public struct BahnDeClient: Sendable {
         /// The train run, to load its stops when `stopsBefore` is unknown (a leg starts mid-run).
         public var tripId: String?
         public var tripSource: DataSource?
+        /// The train's next stop after `station` and its planned arrival there, when known: the ride the seat
+        /// picker is asked for, for its planned Wagenreihung (`seatRequest(for:travelClass:)`).
+        public var nextStop: Station?
+        public var nextArrival: Date?
 
         public init(category: String, number: String, station: Station, plannedDeparture: Date, coupledNumbers: [String] = [],
-                    stopsBefore: [String]? = nil, tripId: String? = nil, tripSource: DataSource? = nil) {
+                    stopsBefore: [String]? = nil, tripId: String? = nil, tripSource: DataSource? = nil,
+                    nextStop: Station? = nil, nextArrival: Date? = nil) {
+            self.nextStop = nextStop
+            self.nextArrival = nextArrival
             self.coupledNumbers = coupledNumbers
             self.category = category
             self.number = number
@@ -302,6 +309,37 @@ public struct BahnDeClient: Sendable {
         var request = formationRequest(line: leg.line, stops: stops, now: now, lookahead: lookahead)
         request?.tripId = leg.tripId
         request?.tripSource = leg.source
+        return request.map { withNextStop($0, in: rideStops(of: leg)) }
+    }
+
+    /// `leg`'s stops with their planned departure and arrival, its end included, for `withNextStop`.
+    static func rideStops(of leg: Leg) -> [RideStop] {
+        [RideStop(station: leg.origin, departure: leg.departure.planned, arrival: nil)]
+            + leg.stopovers.filter { !$0.cancelled }.map { RideStop(station: $0.station, departure: $0.departure?.planned, arrival: $0.arrival?.planned) }
+            + [RideStop(station: leg.destination, departure: nil, arrival: leg.arrival.planned)]
+    }
+
+    static func rideStops(of trip: Trip) -> [RideStop] {
+        trip.stopovers.filter { !$0.cancelled }.map { RideStop(station: $0.station, departure: $0.departure?.planned, arrival: $0.arrival?.planned) }
+    }
+
+    struct RideStop {
+        var station: Station
+        var departure: Date?
+        var arrival: Date?
+    }
+
+    /// `request` with the next stop the train arrives at after its station (`FormationRequest.nextStop`), for the
+    /// seat picker's ride.
+    static func withNextStop(_ request: FormationRequest, in stops: [RideStop]) -> FormationRequest {
+        guard let index = stops.firstIndex(where: { $0.departure == request.plannedDeparture && $0.station.isSamePlace(as: request.station) })
+                ?? stops.firstIndex(where: { $0.station.isSamePlace(as: request.station) }),
+              let next = stops[(index + 1)...].first(where: { stop in
+                  stop.arrival.map { $0 > request.plannedDeparture } ?? false && !stop.station.isSamePlace(as: request.station)
+              }) else { return request }
+        var request = request
+        request.nextStop = next.station
+        request.nextArrival = next.arrival
         return request
     }
 
@@ -328,9 +366,10 @@ public struct BahnDeClient: Sendable {
             guard now < leg.arrival.best, !stops.isEmpty else { return [] }
             index = stops.count - 1
         }
+        let ride = rideStops(of: leg)
         return stops[...index].reversed().prefix(1 + fallbackStops).map { stop in
-            FormationRequest(category: ref.category, number: ref.number, station: stop.station, plannedDeparture: stop.departure.planned,
-                             coupledNumbers: leg.line?.coupledNumbers ?? [], tripId: leg.tripId, tripSource: leg.source)
+            withNextStop(FormationRequest(category: ref.category, number: ref.number, station: stop.station, plannedDeparture: stop.departure.planned,
+                                          coupledNumbers: leg.line?.coupledNumbers ?? [], tripId: leg.tripId, tripSource: leg.source), in: ride)
         }
     }
 
@@ -340,6 +379,7 @@ public struct BahnDeClient: Sendable {
     public static func formationRequest(for trip: Trip, now: Date = .now, lookahead: TimeInterval? = formationLookahead) -> FormationRequest? {
         formationRequest(line: trip.line, stops: trip.stopovers.filter { !$0.cancelled }.map { (station: $0.station, departure: $0.departure) },
                          wholeRun: true, now: now, lookahead: lookahead)
+            .map { withNextStop($0, in: rideStops(of: trip)) }
     }
 
     /// The request for `trip`'s formation at `stop`, whenever the train calls there (past or ahead): the stop must
@@ -348,8 +388,8 @@ public struct BahnDeClient: Sendable {
         guard let ref = sequenceReference(for: trip.line), !stop.cancelled,
               let time = (stop.departure ?? stop.arrival)?.planned,
               (stop.departurePlatform ?? stop.arrivalPlatform)?.best != nil else { return nil }
-        return FormationRequest(category: ref.category, number: ref.number, station: stop.station, plannedDeparture: time,
-                                stopsBefore: stopsBefore(stop.station, in: trip))
+        return withNextStop(FormationRequest(category: ref.category, number: ref.number, station: stop.station, plannedDeparture: time,
+                                             stopsBefore: stopsBefore(stop.station, in: trip)), in: rideStops(of: trip))
     }
 
     /// The stops of `trip` a Wagenreihung can be asked at, in order (see `formationRequest(for:at:)`).
@@ -730,6 +770,15 @@ public struct BahnDeClient: Sendable {
             for (key, value) in Self.headers() { request.setValue(value, forHTTPHeaderField: key) }
             request.setValue("text/html", forHTTPHeaderField: "Accept")
             return String(decoding: try await http.sendRaw(request, auth: auth), as: UTF8.self)
+        }
+    }
+
+    /// The raw answer, asked the same way as `get` (the seat picker's coach types).
+    func getData(_ url: URL) async throws -> Data {
+        try await fetch(url) { [http, auth] target in
+            var request = URLRequest(url: target, timeoutInterval: http.timeout)
+            for (key, value) in Self.headers() { request.setValue(value, forHTTPHeaderField: key) }
+            return try await http.sendRaw(request, auth: auth)
         }
     }
 

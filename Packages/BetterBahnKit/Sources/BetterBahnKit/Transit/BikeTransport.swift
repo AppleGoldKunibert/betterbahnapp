@@ -141,7 +141,8 @@ public struct BikeTransport: Sendable, Hashable {
         let isICE = line.name.uppercased().hasPrefix("ICE")
         if let sequence, sequence.coaches.contains(where: \.isPassengerCoach) {
             if !sequence.bikeCoaches.isEmpty { return true }
-            if isICE, sequence.source == .bahnDe { return false }
+            // The seat picker's coach types show the bike pictogram, so it lists them all too, once every type is known.
+            if isICE, sequence.source == .bahnDe || (sequence.source == .seatPicker && sequence.knowsAllCoachTypes) { return false }
         }
         guard isICE, !families.isEmpty else { return nil }
         return families.allSatisfy(familiesWithoutBikes.contains) ? false : nil

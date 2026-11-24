@@ -3162,6 +3162,16 @@
         }
       }
     },
+    "Daten: Sitzplatzreservierung der DB" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Data: DB seat reservation"
+          }
+        }
+      }
+    },
     "Daten: vagonweb.cz" : {
       "localizations" : {
         "en" : {
