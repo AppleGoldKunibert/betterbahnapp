@@ -18,6 +18,74 @@
         }
       }
     },
+    "Das hat gerade nicht geklappt. Tippe hier, um es noch mal zu versuchen." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Das hat gerade nicht geklappt. Tippe hier, um es noch mal zu versuchen."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "That didn't work just now. Tap here to try again."
+          }
+        }
+      }
+    },
+    "Du bist in %@ nach %@ eingecheckt." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Du bist in %@ nach %@ eingecheckt."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You're checked in on %@ to %@."
+          }
+        }
+      }
+    },
+    "Du bist zu dieser Zeit schon in einem anderen Zug eingecheckt. Tippe hier, um trotzdem einzuchecken." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Du bist zu dieser Zeit schon in einem anderen Zug eingecheckt. Tippe hier, um trotzdem einzuchecken."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You're already checked in on another train at this time. Tap here to check in anyway."
+          }
+        }
+      }
+    },
+    "Eingecheckt" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eingecheckt"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Checked in"
+          }
+        }
+      }
+    },
     "Gebuchte Züge" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4208,6 +4276,23 @@
         }
       }
     },
+    "Noch nicht eingecheckt" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Noch nicht eingecheckt"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not checked in yet"
+          }
+        }
+      }
+    },
     "Norwegen" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5264,6 +5349,40 @@
         }
       }
     },
+    "Tippe hier und melde dich bei Träwelling an." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tippe hier und melde dich bei Träwelling an."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap here and log in to Träwelling."
+          }
+        }
+      }
+    },
+    "Tippe hier und wähle, in welchem Zugteil du sitzt." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tippe hier und wähle, in welchem Zugteil du sitzt."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap here and choose which part of the train you're in."
+          }
+        }
+      }
+    },
     "Triebzüge" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5311,6 +5430,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Träwelling didn’t return a code."
+          }
+        }
+      }
+    },
+    "Träwelling kennt %@ nicht. Tippe hier, um ihn selbst einzutragen." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Träwelling kennt %@ nicht. Tippe hier, um ihn selbst einzutragen."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Träwelling doesn't know %@. Tap here to add it yourself."
           }
         }
       }

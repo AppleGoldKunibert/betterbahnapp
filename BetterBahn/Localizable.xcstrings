@@ -11,6 +11,16 @@
         }
       }
     },
+    "Alle einchecken" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Check In on All"
+          }
+        }
+      }
+    },
     "DB hält die Fahrten nur für kurze Zeit vor." : {
       "localizations" : {
         "en" : {
@@ -71,6 +81,36 @@
         }
       }
     },
+    "Du bist zu dieser Zeit schon in einem anderen Zug eingecheckt." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You're already checked in on another train at this time."
+          }
+        }
+      }
+    },
+    "Du bist zu dieser Zeit schon in einem anderen Zug eingecheckt. Dafür gibt es keine Punkte." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You're already checked in on another train at this time. There are no points for this."
+          }
+        }
+      }
+    },
+    "In alle Züge eingecheckt" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Checked in on all trains"
+          }
+        }
+      }
+    },
     "Kurzfristig getauscht" : {
       "localizations" : {
         "en" : {
@@ -107,6 +147,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Extra features"
+          }
+        }
+      }
+    },
+    "Träwelling kennt diesen Zug nicht. Du kannst ihn selbst eintragen." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Träwelling doesn't know this train. You can add it yourself."
           }
         }
       }

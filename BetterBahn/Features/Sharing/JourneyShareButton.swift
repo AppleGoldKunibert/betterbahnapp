@@ -12,6 +12,8 @@ struct JourneyShareButton: View {
     let title: String
     /// Opens the check-in for a train of the journey (#519); nil hides "Einchecken" (no Träwelling, read-only).
     var onCheckin: ((Leg) -> Void)?
+    /// Checks in on every train at once (#574), offered with the trains when there are several.
+    var onCheckinAll: (() -> Void)?
     @State private var isPreparing = false
     /// The link made for the journey's current payload, so sharing again doesn't upload it again.
     @State private var lastLink: (payload: String, url: URL)?
@@ -58,6 +60,9 @@ struct JourneyShareButton: View {
         .disabled(isPreparing)
         .accessibilityLabel("Teilen")
         .confirmationDialog("Welcher Zug?", isPresented: $pickingTrain) {
+            if let onCheckinAll, journey.offersGroupCheckin {
+                Button("Alle Züge") { onCheckinAll() }
+            }
             ForEach(journey.transitLegs) { leg in
                 Button("\(leg.line?.name ?? "") → \(leg.destination.displayName)") { onCheckin?(leg) }
             }

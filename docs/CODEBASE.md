@@ -100,7 +100,7 @@ in `project.pbxproj`: new files join their target automatically.
   with a push token; `AppModel.handOverLiveActivity()` gives it and the journey to `Cloudflare/live-activity` when the
   app goes to the background and after the background refresh, `takeBackLiveActivity()` ends that when it is active (#315).
 - `App/ExitReminders.swift` – exit reminders (#313, Settings → Mitteilungen, per journey `exitRemindersOff`): Kit `Journey.exitReminders` → time-sensitive notifications `exit|<entry>|<leg>`, rescheduled after every refresh, one per stop (per-device log `exitReminderDates`); while the Live Activity runs, its alert instead. The text names the exit side ("Fulda, Ausstieg links", `ExitSides.side(leaving:)`, #394) when known.
-- Same file: check-in reminders (#519, Settings → Mitteilungen, only with a Träwelling login, per-device `checkinReminders`): Kit `Journey.checkinReminders` → notifications `checkin|<entry>|<leg>` 5 min after each train's live departure, dropped once `checkinStatusIDs` has the leg (its `didSet` runs the sync). "Einchecken" is also in `JourneyShareButton`'s menu (asks which train when there are several).
+- Same file: check-in reminders (#519, Settings → Mitteilungen, only with a Träwelling login, per-device `checkinReminders`): Kit `Journey.checkinReminders` → notifications `checkin|<entry>|<leg>` 5 min after each train's live departure, dropped once `checkinStatusIDs` has the leg (its `didSet` runs the sync). "Einchecken" is also in `JourneyShareButton`'s menu (asks which train when there are several, or "Alle Züge" → `GroupCheckinSheet`, #574). #580: a tap on the reminder opens its journey and the check-in form (`checkinLegToStart`, Kit `CheckinReminder.target(ofNotificationID:)`); its button "Einchecken" (`CheckinReminderNotifier`, unlock required) checks in in the background (`checkinFromReminder`, visibility from Settings) and posts the result (Kit `ReminderCheckinOutcome`): checked in → tap shows the check-in, else (coupled trains, unknown train, collision, logged out) tap opens the form.
 - `App/CalendarEvents.swift` – calendar events of saved journeys (#382): `CalendarButton` (`Features/Trips/`, next to
   the share button in `JourneyDetailView`) adds one from Kit `JourneyCalendarEvent`, tapped again deletes it
   (`removeFromCalendar`, full access only); the first time it asks for
@@ -264,7 +264,11 @@ in `project.pbxproj`: new files join their target automatically.
   that only apply Mo–Fr at some hours and S-Bahn Sperrzeiten (HVV, VGN) by the leg's departure, holidays not known).
   Transitous' `bikesAllowed` is no use: DELFI sends `false` for every German train.
 - `Features/Traewelling/` – `CheckinSheet` (`MenuPickerRow` with constant width; keyboard hides on submit and only
-  returns on `TraewellingError.isInvalidInput`; `.collision` offers "Trotzdem einchecken", `CheckinDraft.force`),
+  returns on `TraewellingError.isInvalidInput`; `.collision` offers "Trotzdem einchecken", `CheckinDraft.force`; form
+  `CheckinFormCard`, `CoupledTrainChoice`, `TraewellingLoginCard` shared with `GroupCheckinSheet`; the check-in itself,
+  with its fallbacks and tags, is `AppModel.checkin`/`checkinAsManualTrip` in `App/TraewellingCheckin.swift`),
+  `GroupCheckinSheet` (#574: one form for every train, then one after the other; Kit `GroupCheckin` keeps each
+  train's state, unknown train/collision get their own button per row),
   `TraewellingLoginButton`, `CustomEmojiViews` (`EmojiMessageField`, `EmojiText`), `CheckinDetailSheet` ("Check-in
   ansehen" for check-ins made in the app, `AppModel.checkinStatusIDs`: edit text/visibility/trip type/tags, delete,
   "Mitreisende"), `CheckoutPrompt` (removing a journey with check-ins: check out at the last stop reached via

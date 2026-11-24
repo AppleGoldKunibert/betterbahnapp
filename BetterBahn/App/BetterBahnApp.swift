@@ -49,8 +49,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
             model.handleLiveActivityBackgroundTask(refreshTask)
         }
         UNUserNotificationCenter.current().delegate = self
-        // "Fährst du heute?" with its answers (#397).
-        UNUserNotificationCenter.current().setNotificationCategories([CommuteNotifier.notificationCategory])
+        // "Fährst du heute?" with its answers (#397), the check-in reminder's "Einchecken" (#580).
+        UNUserNotificationCenter.current().setNotificationCategories([CommuteNotifier.notificationCategory,
+                                                                      CheckinReminderNotifier.notificationCategory])
         // Silent pushes, needing no permission, tell the saved journeys' CloudKit sync about changes elsewhere (#427).
         application.registerForRemoteNotifications()
         return true
@@ -76,8 +77,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 
     /// A followed user's check-in notification (#266) opens that check-in, a like or a fellow traveller (#447) the
     /// check-in it is about, a regular trip's question (#397) is
-    /// answered (iOS waits for the journey to be saved after "Ja"), a push about a regular trip's journey opens it;
-    /// the others just open the app.
+    /// answered (iOS waits for the journey to be saved after "Ja"), a push about a regular trip's journey opens it,
+    /// a check-in reminder checks in ("Einchecken") or opens the check-in form (#580); the others just open the app.
     ///
     /// Not the `async` variant: its generated wrapper calls iOS's completion handler off the main thread, and iOS
     /// then stops the app ("Call must be made on main thread") as soon as a notification is tapped.
@@ -91,11 +92,33 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         let retry = CommuteNotifier.isRetry(userInfo)
         let journeyID = CommuteNotifier.journeyID(in: userInfo)
         let action = response.actionIdentifier
+        let checkinReminder = CheckinReminder.target(ofNotificationID: response.notification.request.identifier)
+        let checkinForm = AppModel.checkinFormTarget(in: userInfo)
         let done = MainThreadCompletion(completionHandler)
         Task { @MainActor in
+            if let target = checkinReminder ?? checkinForm {
+                await self.handleCheckinReminder(action: action, entry: target.entry, legID: target.legID)
+                done.call()
+                return
+            }
             await self.handleNotification(action: action, statusID: statusID, ownStatusID: ownStatusID, companionStatusID: companionStatusID,
                                           question: question, retry: retry, journeyID: journeyID)
             done.call()
+        }
+    }
+
+    private func handleCheckinReminder(action: String, entry: UUID, legID: String) async {
+        switch action {
+        case CheckinReminderNotifier.checkinAction:
+            // Extra time: finding the train on Träwelling can take a while.
+            let assertion = BackgroundTimeAssertion()
+            assertion.id = UIApplication.shared.beginBackgroundTask(withName: "CheckinFromReminder") { assertion.end() }
+            await model?.checkinFromReminder(entry: entry, legID: legID)
+            assertion.end()
+        case UNNotificationDismissActionIdentifier:
+            break
+        default:
+            model?.openCheckinForm(entry: entry, legID: legID)
         }
     }
 
@@ -121,6 +144,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         let userInfo = notification.request.content.userInfo
         let shows = notification.request.identifier.hasPrefix(AppModel.exitReminderPrefix)
             || notification.request.identifier.hasPrefix(AppModel.checkinReminderPrefix)
+            || notification.request.identifier.hasPrefix(CheckinReminderNotifier.resultPrefix)
             || CommuteNotifier.question(in: userInfo) != nil || CommuteNotifier.journeyID(in: userInfo) != nil
         completionHandler(shows ? [.banner, .list, .sound] : [])
     }

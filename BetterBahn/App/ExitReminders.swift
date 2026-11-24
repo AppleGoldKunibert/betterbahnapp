@@ -113,7 +113,7 @@ private enum ExitReminderLog {
 /// the user is checked in on it. Scheduled by the same sync as the exit reminders, so they never overlap.
 extension AppModel {
     /// Identifiers of check-in reminder notifications start with this (see `AppDelegate`'s `willPresent`).
-    nonisolated static let checkinReminderPrefix = "checkin|"
+    nonisolated static let checkinReminderPrefix = CheckinReminder.notificationPrefix
 
     private func syncCheckinReminders(now: Date = .now) async {
         let center = UNUserNotificationCenter.current()
@@ -122,7 +122,7 @@ extension AppModel {
             let checkedIn = Set(checkinStatusIDs.keys)
             for entry in upcomingJourneys where (entry.journey.departure?.best ?? .distantFuture) < now.addingTimeInterval(24 * 3600) {
                 for reminder in entry.journey.checkinReminders(now: now, checkedIn: checkedIn) {
-                    wanted[Self.checkinReminderPrefix + entry.id.uuidString + "|" + reminder.legID] = reminder
+                    wanted[CheckinReminder.notificationID(entry: entry.id, legID: reminder.legID)] = reminder
                 }
             }
         }
@@ -133,9 +133,90 @@ extension AppModel {
             content.title = reminder.title
             content.body = reminder.body
             content.sound = .default
+            // "Einchecken" checks in right from the notification (#580).
+            content.categoryIdentifier = CheckinReminderNotifier.category
             let trigger = UNTimeIntervalNotificationTrigger(timeInterval: max(1, reminder.fireDate.timeIntervalSince(now)), repeats: false)
             // The same identifier replaces the pending one, so a moved reminder never comes twice.
             try? await center.add(UNNotificationRequest(identifier: identifier, content: content, trigger: trigger))
         }
+    }
+}
+
+/// The check-in reminder's "Einchecken" button (#580): checks in without opening the app, with the visibility
+/// from Settings. What doesn't work that way (coupled trains, a train Träwelling doesn't know, another check-in
+/// at that time) is told in a notification whose tap opens the check-in form for that train.
+enum CheckinReminderNotifier {
+    static let category = "checkin-reminder"
+    nonisolated static let checkinAction = "checkin-now"
+    /// Identifiers of the notifications telling how the button's check-in went.
+    nonisolated static let resultPrefix = "checkin-result|"
+
+    /// Registered at launch. Asks to unlock first: a locked iPhone shouldn't post on the user's behalf.
+    static var notificationCategory: UNNotificationCategory {
+        UNNotificationCategory(identifier: category, actions: [
+            UNNotificationAction(identifier: checkinAction, title: String(localized: "Einchecken"),
+                                 options: [.authenticationRequired], icon: UNNotificationActionIcon(systemImageName: "checkmark.seal.fill")),
+        ], intentIdentifiers: [], options: [])
+    }
+}
+
+extension AppModel {
+    /// A tapped check-in reminder, or the notification after its button: opens the journey and the check-in
+    /// form for that train (#580).
+    func openCheckinForm(entry entryID: UUID, legID: String) {
+        guard let entry = savedJourneys.first(where: { $0.id == entryID }),
+              entry.journey.legs.contains(where: { $0.id == legID }) else { return }
+        checkinLegToStart = legID
+        journeyToOpen = entry
+    }
+
+    /// "Einchecken" on a check-in reminder: checks in on the train and tells how it went in a notification.
+    func checkinFromReminder(entry entryID: UUID, legID: String) async {
+        guard let entry = savedJourneys.first(where: { $0.id == entryID }),
+              let leg = entry.journey.legs.first(where: { $0.id == legID }),
+              checkinStatusIDs[leg.id] == nil else { return }
+        var statusId: Int?
+        let outcome: ReminderCheckinOutcome
+        if leg.needsCoupledTrainChoice {
+            outcome = .needsTrainChoice
+        } else {
+            do {
+                if let made = try await checkin(CheckinDraft(leg: leg, visibility: settings.traewellingVisibility), shownLeg: leg) {
+                    statusId = made.result.statusId
+                    outcome = .checkedIn
+                } else {
+                    outcome = .trainNotFound
+                }
+            } catch OAuthError.notLoggedIn {
+                outcome = .notLoggedIn
+            } catch TraewellingError.collision {
+                outcome = .collision
+            } catch {
+                outcome = .failed
+            }
+        }
+        let content = UNMutableNotificationContent()
+        content.title = outcome.title
+        content.body = outcome.body(for: leg)
+        if outcome == .checkedIn {
+            // A tap shows the check-in ("Check-in ansehen"), like a like's notification does.
+            if let statusId { content.userInfo = [FollowedCheckinNotifier.ownStatusIDKey: statusId] }
+        } else {
+            content.sound = .default
+            content.userInfo = [Self.checkinFormEntryKey: entry.id.uuidString, Self.checkinFormLegKey: leg.id]
+        }
+        let request = UNNotificationRequest(identifier: CheckinReminderNotifier.resultPrefix + entry.id.uuidString + "|" + leg.id,
+                                            content: content, trigger: nil)
+        try? await UNUserNotificationCenter.current().add(request)
+    }
+
+    /// The journey and leg whose check-in form a tap on the notification after "Einchecken" opens.
+    nonisolated static let checkinFormEntryKey = "checkinFormEntry"
+    nonisolated static let checkinFormLegKey = "checkinFormLeg"
+
+    nonisolated static func checkinFormTarget(in userInfo: [AnyHashable: Any]) -> (entry: UUID, legID: String)? {
+        guard let entry = (userInfo[checkinFormEntryKey] as? String).flatMap(UUID.init(uuidString:)),
+              let legID = userInfo[checkinFormLegKey] as? String else { return nil }
+        return (entry, legID)
     }
 }

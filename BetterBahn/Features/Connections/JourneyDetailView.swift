@@ -16,6 +16,8 @@ struct JourneyDetailView: View {
     @State private var legToReplace: LegSelection?
     @State private var legToReplan: LegSelection?
     @State private var checkinLeg: Leg?
+    /// Every train at once (#574).
+    @State private var groupCheckin: GroupCheckinLegs?
     @State private var shownCheckin: ShownCheckin?
     @State private var showAlternatives = false
     @State private var showJourneyMap = false
@@ -81,6 +83,12 @@ struct JourneyDetailView: View {
             guard let id, let leg = journey.legs.first(where: { model.checkinStatusIDs[$0.id] == id }) else { return }
             model.checkinToShow = nil
             shownCheckin = ShownCheckin(leg: leg, statusId: id)
+        }
+        // A check-in reminder was tapped (#580): its train's check-in form.
+        .onChange(of: model.checkinLegToStart, initial: true) { _, id in
+            guard let id, !readOnly, let leg = journey.legs.first(where: { $0.id == id }) else { return }
+            model.checkinLegToStart = nil
+            checkinLeg = leg
         }
         .task {
             // An old journey gets the delays its day really had from the train statistics.
@@ -161,6 +169,7 @@ struct JourneyDetailView: View {
             }
         }
         .sheet(item: $checkinLeg) { CheckinSheet(leg: $0) }
+        .sheet(item: $groupCheckin) { GroupCheckinSheet(legs: $0.legs, checkedIn: Set(model.checkinStatusIDs.keys)) }
         .sheet(item: $shownCheckin) { CheckinDetailSheet(leg: $0.leg, statusId: $0.statusId) }
         .sheet(isPresented: $showAlternatives) {
             if let entry = model.savedEntry(for: journey) {
@@ -566,7 +575,8 @@ struct JourneyDetailView: View {
                         TicketButton(tickets: model.tickets(for: journey), journey: journey)
                     }
                     JourneyShareButton(journey: journey, title: shareTitle,
-                                       onCheckin: readOnly || !model.settings.traewellingEnabled ? nil : { checkinLeg = $0 })
+                                       onCheckin: readOnly || !model.settings.traewellingEnabled ? nil : { checkinLeg = $0 },
+                                       onCheckinAll: { groupCheckin = GroupCheckinLegs(legs: journey.groupCheckinLegs) })
                     if !readOnly, let entry = model.savedEntry(for: journey) {
                         CalendarButton(entry: entry)
                         RegularTripButton(journey: journey)
@@ -816,6 +826,12 @@ struct TransferRow: View {
 }
 
 /// A leg's remembered Träwelling check-in, for `CheckinDetailSheet`.
+/// The trains of a group check-in (#574), as a sheet's item.
+struct GroupCheckinLegs: Identifiable {
+    let legs: [Leg]
+    var id: String { legs.map(\.id).joined(separator: "+") }
+}
+
 struct ShownCheckin: Identifiable {
     let leg: Leg
     let statusId: Int
