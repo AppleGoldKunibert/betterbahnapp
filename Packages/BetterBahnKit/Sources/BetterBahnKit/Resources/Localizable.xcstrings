@@ -7054,6 +7054,40 @@
           }
         }
       }
+    },
+    "Wagen %@, Platz %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wagen %@, Platz %@"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Coach %@, Seat %@"
+          }
+        }
+      }
+    },
+    "Die Sitzung bei bahn.de ist abgelaufen. Bitte versuch es noch mal." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Sitzung bei bahn.de ist abgelaufen. Bitte versuch es noch mal."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your bahn.de session has expired. Please try again."
+          }
+        }
+      }
     }
   },
   "version" : "1.0"
