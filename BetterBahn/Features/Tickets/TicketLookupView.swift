@@ -133,20 +133,8 @@ struct TicketLookupView: View {
         if page.url?.path().hasPrefix("/buchung/meine-reisen") != true {
             page.load(URLRequest(url: DBOrderPage.searchURL))
         }
-        let arguments: [String: Any] = [
-            "orderNumber": orderNumber.trimmingCharacters(in: .whitespaces).uppercased(),
-            "lastName": lastName.trimmingCharacters(in: .whitespaces),
-        ]
-        // The page renders its form a moment after loading.
-        var submitted = false
-        for _ in 0..<30 {
-            if let result = try? await page.callJavaScript(DBOrderPage.fillScript, arguments: arguments) as? String,
-               result == "submitted" {
-                submitted = true
-                break
-            }
-            try? await Task.sleep(for: .milliseconds(500))
-        }
+        let submitted = await page.submitOrderSearch(orderNumber: orderNumber.trimmingCharacters(in: .whitespaces).uppercased(),
+                                                     lastName: lastName.trimmingCharacters(in: .whitespaces))
         guard submitted else {
             state = .needsPage
             return
@@ -154,7 +142,7 @@ struct TicketLookupView: View {
         for _ in 0..<40 {
             try? await Task.sleep(for: .milliseconds(500))
             guard state == .searching, !isFetching else { return }
-            if let message = try? await page.callJavaScript(DBOrderPage.errorScript) as? String, !message.isEmpty {
+            if let message = await page.orderSearchError() {
                 state = .failed(message)
                 return
             }
@@ -171,7 +159,8 @@ struct TicketLookupView: View {
             do {
                 let value = try await page.callJavaScript(DBOrderPage.fetchScript, arguments: ["orderNumber": number])
                 let result = try DBOrderPage.result(from: value)
-                let imported = try await model.importTickets(result, orderNumber: number)
+                let imported = try await model.importTickets(result, orderNumber: number,
+                                                             lastName: lastName.trimmingCharacters(in: .whitespaces))
                 onImport(imported)
                 dismiss()
                 return
@@ -184,5 +173,28 @@ struct TicketLookupView: View {
                 return
             }
         }
+    }
+}
+
+extension WebPage {
+    /// Types the order number and name into bahn.de's "Auftragssuche" and submits it; false when
+    /// the form didn't show up (bahn.de then wants something else, e.g. a captcha).
+    func submitOrderSearch(orderNumber: String, lastName: String) async -> Bool {
+        let arguments: [String: Any] = ["orderNumber": orderNumber, "lastName": lastName]
+        // The page renders its form a moment after loading.
+        for _ in 0..<30 {
+            if let result = try? await callJavaScript(DBOrderPage.fillScript, arguments: arguments) as? String,
+               result == "submitted" {
+                return true
+            }
+            try? await Task.sleep(for: .milliseconds(500))
+        }
+        return false
+    }
+
+    /// The error bahn.de shows after a search (e.g. wrong order number or name), if any.
+    func orderSearchError() async -> String? {
+        guard let message = try? await callJavaScript(DBOrderPage.errorScript) as? String, !message.isEmpty else { return nil }
+        return message
     }
 }
