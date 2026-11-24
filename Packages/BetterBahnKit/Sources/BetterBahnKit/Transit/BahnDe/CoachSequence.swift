@@ -91,6 +91,9 @@ public struct CoachSequence: Sendable, Hashable {
     }
 
     public var source: Source = .bahnDe
+    /// The seat picker's plan only: whether every coach's type was known, so its classes and amenities (bike spaces
+    /// too) are complete. False when a coach type couldn't be loaded.
+    public var knowsAllCoachTypes = true
     /// vagonweb's plan only: the stations up to this stop where the train changes direction (it is
     /// shown turned round after an odd number of them).
     public var reversals: [String] = []

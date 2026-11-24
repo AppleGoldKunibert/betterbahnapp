@@ -4467,6 +4467,22 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(CoachSequence.seatPickerPlan(SeatAvailability(coaches: [:], parts: []), types: [:], trainName: "ICE 1") == nil)
     }
 
+    /// The seat picker's plan says "no bike spaces" for an ICE only when every coach type was loaded; with one
+    /// missing (a failed request) it says nothing.
+    @Test func seatPickerPlanBikeSpacesNeedEveryCoachType() throws {
+        let ice = Line(name: "ICE 804", number: "804", product: .highSpeed, operatorName: "DB Fernverkehr AG")
+        let seats = SeatAvailability(coaches: [:], parts: [[.init(number: "1", type: "I5812-412.(12-TLG.)-1"), .init(number: "2", type: "I2412-412.(12-TLG.)-2")]])
+        let plain = CoachType(classes: ["KLASSE_2"], symbols: [])
+        let complete = try #require(CoachSequence.seatPickerPlan(seats, types: ["I5812-412.(12-TLG.)-1": plain, "I2412-412.(12-TLG.)-2": plain], trainName: "ICE 804"))
+        #expect(complete.knowsAllCoachTypes)
+        #expect(BikeTransport.hasBikeSpaces(line: ice, families: [], sequence: complete) == false)
+        let partial = try #require(CoachSequence.seatPickerPlan(seats, types: ["I2412-412.(12-TLG.)-2": plain], trainName: "ICE 804"))
+        #expect(!partial.knowsAllCoachTypes)
+        #expect(BikeTransport.hasBikeSpaces(line: ice, families: [], sequence: partial) == nil)
+        let withBikes = try #require(CoachSequence.seatPickerPlan(seats, types: ["I5812-412.(12-TLG.)-1": CoachType(classes: ["KLASSE_2"], symbols: ["FAHRRAD"])], trainName: "ICE 804"))
+        #expect(BikeTransport.hasBikeSpaces(line: ice, families: [], sequence: withBikes) == true)
+    }
+
     /// In vagonweb's order and direction, with vagonweb's dining car the seat picker doesn't list; a coach vagonweb
     /// doesn't plan stays at the end of its part. A plan numbered otherwise leaves the order alone.
     @Test func seatPickerPlanInVagonwebsOrder() throws {

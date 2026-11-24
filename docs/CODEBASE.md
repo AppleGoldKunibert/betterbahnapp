@@ -485,7 +485,8 @@ in `project.pbxproj`: new files join their target automatically.
   reserve (locomotives, power cars, dining cars); unchanged when the two number the coaches differently. Ride:
   `seatRequest(for: FormationRequest)` from the stop to the train's next one (`FormationRequest.nextStop`/`nextArrival`,
   `withNextStop`), a leg's own seat request when shown with a leg (shares the seat map's answer); booked out in the class
-  asked → the other class. bahn.de's sequence is still compared with vagonweb's plan only (`vagonwebOnly`).
+  asked → the other class. A coach type that couldn't be loaded leaves `knowsAllCoachTypes` false, so the bike check says nothing
+  instead of "no bike spaces". bahn.de's sequence is still compared with vagonweb's plan only (`vagonwebOnly`).
 - `Transit/BahnDe/CoachAdvice.swift`, `StationPlatforms.swift` – where to board (#383). `StationPlatforms.at(eva:)` from
   `Resources/Platforms.json` (`scripts/make-platforms.py`): tracks sharing a platform, per track the OSM platform
   edge (ends, length), stairs/lifts/terminus exit and sector signs in metres along it. `CoachAdvice.plan(for:…)` per

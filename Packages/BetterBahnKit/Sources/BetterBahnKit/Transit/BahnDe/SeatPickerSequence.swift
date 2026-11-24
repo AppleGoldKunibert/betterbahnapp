@@ -141,10 +141,12 @@ extension CoachSequence {
             }
         }
         guard !coaches.isEmpty else { return nil }
-        return CoachSequence(
+        var sequence = CoachSequence(
             platform: nil, platformLength: nil, sectors: [], groups: groups, coaches: coaches,
             travelsTowardsPlatformEnd: nil, differsFromSchedule: false,
             formation: TrainFormation(units: groups.compactMap(\.unit)), source: .seatPicker)
+        sequence.knowsAllCoachTypes = seats.parts.joined().allSatisfy { coach in coach.type.map { types[$0] != nil } ?? false }
+        return sequence
     }
 
     /// The seat-map sheet (`SeatMap.sheet`) of a trainset of the seat picker's `series`: every BR 403 runs redesigned,
@@ -229,10 +231,12 @@ extension BahnDeClient {
         }
         guard let seats, !seats.parts.isEmpty else { return nil }
         let ids = Set(seats.parts.flatMap { $0.compactMap(\.type) }).filter(CoachType.isValidID)
-        var types: [String: CoachType] = [:]
-        for id in ids.sorted() {
-            // A coach without its type still shows, just without class and amenities.
-            if let type = try? await coachType(id) { types[id] = type }
+        // A coach without its type still shows, just without class and amenities (`knowsAllCoachTypes`).
+        let types = await withTaskGroup(of: (String, CoachType?).self) { group in
+            for id in ids { group.addTask { (id, try? await self.coachType(id)) } }
+            var types: [String: CoachType] = [:]
+            for await (id, type) in group { types[id] = type }
+            return types
         }
         return CoachSequence.seatPickerPlan(seats, types: types, trainName: "\(request.category.uppercased()) \(request.number)")
     }
