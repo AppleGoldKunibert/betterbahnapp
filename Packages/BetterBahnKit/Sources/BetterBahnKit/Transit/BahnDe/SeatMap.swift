@@ -121,7 +121,7 @@ extension CoachSequence {
     /// The seat map of `coach`: only in bahn.de's Wagenreihung (not vagonweb's plan) and only for the ICE
     /// series DB draws.
     public func seatMap(for coach: Coach) -> SeatMap? {
-        guard source == .bahnDe, coach.isPassengerCoach, let number = coach.number, groups.indices.contains(coach.group),
+        guard source == .bahnDe || source == .seatPicker, coach.isPassengerCoach, let number = coach.number, groups.indices.contains(coach.group),
               let sheet = groups[coach.group].seatMapSheet else { return nil }
         return SeatMap.coach(number, sheet: sheet)
     }

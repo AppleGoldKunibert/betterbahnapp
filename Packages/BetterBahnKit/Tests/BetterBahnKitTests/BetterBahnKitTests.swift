@@ -4419,6 +4419,102 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
         #expect(BahnDeClient.seatAvailability(fromPage: "<html></html>") == nil)
     }
 
+    /// ICE 1007 runs as two ICE 3 (BR 403): the seat picker lists both parts, each with its coaches and their types.
+    @Test func readsTheSeatPickerParts() throws {
+        let url = try #require(Bundle.module.url(forResource: "bahnde-gsd-ice1007", withExtension: "html", subdirectory: "Fixtures"))
+        let seats = try #require(BahnDeClient.seatAvailability(fromPage: String(contentsOf: url, encoding: .utf8)))
+        #expect(seats.parts.map { $0.map(\.number) } == [["21", "22", "23", "25", "27", "28", "29"], ["31", "32", "33", "35", "37", "38", "39"]])
+        #expect(seats.parts[0][0].type == "I403F-403.RD-21")
+        #expect(CoachType.series(ofCoachType: "I403F-403.RD-21") == "403")
+        #expect(CoachType.series(ofCoachType: "I5812-412.(12-TLG.)-1") == "412")
+        #expect(CoachType.series(ofCoachType: "R8911-ICEL.1.ABRUF-1") == nil)
+        #expect(CoachType.isValidID("I5812-412.(12-TLG.)-1") && !CoachType.isValidID("a/b") && !CoachType.isValidID(""))
+    }
+
+    /// The ICE 4's coach 10: first class next to the restaurant, seats for the severely disabled.
+    @Test func readsACoachType() throws {
+        let url = try #require(Bundle.module.url(forResource: "bahnde-wagentyp-412-10", withExtension: "json", subdirectory: "Fixtures"))
+        let type = try #require(CoachType.parse(Data(contentsOf: url)))
+        #expect(type.firstClass && !type.secondClass)
+        #expect(type.kind == .halfDiningCar)
+        #expect(type.amenities.contains(.severelyDisabledSeats) && !type.amenities.contains(.bikeSpace))
+        #expect(CoachType.parse(Data(#"{"id":"x","wagenteile":[]}"#.utf8)) == nil)
+        let family = CoachType(classes: ["KLASSE_2"], symbols: ["FAMILIENBEREICH", "KLEINKINDABTEIL", "ROLLSTUHL", "RUHE", "FAHRRAD"])
+        #expect(family.amenities == [.bikeSpace, .wheelchairSpace, .quietZone, .familyZone, .infantCabin])
+        #expect(family.kind == .passenger)
+    }
+
+    /// The plan from the seat picker: one group per part with its series and seat-map sheet, classes from the types,
+    /// a coach whose type is unknown still listed; no positions or direction.
+    @Test func seatPickerPlan() throws {
+        let seats = SeatAvailability(coaches: [:], parts: [
+            [.init(number: "21", type: "I403F-403.RD-21"), .init(number: "28", type: "I403B-403.RD-28"), .init(number: "29", type: "I403A-403.RD-29")],
+            [.init(number: "31", type: "I4035-403.RD-31")],
+        ])
+        let types = ["I403F-403.RD-21": CoachType(classes: ["KLASSE_2"], symbols: []),
+                     "I403B-403.RD-28": CoachType(classes: ["KLASSE_1"], symbols: ["RUHE"])]
+        let plan = try #require(CoachSequence.seatPickerPlan(seats, types: types, trainName: "ICE 1007"))
+        #expect(plan.source == .seatPicker)
+        #expect(plan.coaches.map(\.number) == ["21", "28", "29", "31"])
+        #expect(plan.coaches.map(\.group) == [0, 0, 0, 1])
+        #expect(plan.coaches[1].firstClass && plan.coaches[1].amenities == [.quietZone])
+        #expect(plan.coaches[0].secondClass && !plan.coaches[2].firstClass && !plan.coaches[2].secondClass)
+        #expect(plan.groups.map(\.unit?.model) == ["ICE 3", "ICE 3"])
+        #expect(plan.groups[0].seatMapSheet == "403")
+        #expect(plan.travelsTowardsPlatformEnd == nil && plan.platform == nil)
+        #expect(plan.position(ofCoach: "28", train: "ICE 1007") == .noSectors(coachID: 1))
+        #expect(plan.seatMap(for: plan.coaches[1]) != nil)
+        #expect(CoachSequence.seatPickerPlan(SeatAvailability(coaches: [:], parts: []), types: [:], trainName: "ICE 1") == nil)
+    }
+
+    /// In vagonweb's order and direction, with vagonweb's dining car the seat picker doesn't list; a coach vagonweb
+    /// doesn't plan stays at the end of its part. A plan numbered otherwise leaves the order alone.
+    @Test func seatPickerPlanInVagonwebsOrder() throws {
+        func coach(_ id: Int, _ number: String?, _ kind: CoachSequence.Coach.Kind = .passenger, first: Bool = false) -> CoachSequence.Coach {
+            CoachSequence.Coach(id: id, number: number, kind: kind, firstClass: first, secondClass: !first, closed: false, amenities: [],
+                                bikeSpaces: nil, start: nil, end: nil, sector: nil, group: 0)
+        }
+        let seats = SeatAvailability(coaches: [:], parts: [["1", "2", "3", "5", "9"].map { SeatAvailability.Coach(number: $0) }])
+        let picker = try #require(CoachSequence.seatPickerPlan(seats, types: [:], trainName: "IC 2013"))
+        var vagonweb = CoachSequence(platform: nil, platformLength: nil, sectors: [], groups: [.init(trainName: "IC 2013", isRequestedTrain: true)],
+                                     coaches: [coach(0, nil, .locomotive), coach(1, "5", first: true), coach(2, "4", .diningCar),
+                                               coach(3, "3"), coach(4, "2"), coach(5, "1")],
+                                     travelsTowardsPlatformEnd: false, differsFromSchedule: false, formation: TrainFormation(units: []),
+                                     source: .vagonweb(validFrom: nil, validUntil: nil))
+        vagonweb.reversals = ["Köln Hbf"]
+        let ordered = picker.ordered(like: vagonweb)
+        #expect(ordered.coaches.map(\.number) == [nil, "5", "4", "3", "2", "1", "9"])
+        #expect(ordered.coaches.map(\.kind) == [.locomotive, .passenger, .diningCar, .passenger, .passenger, .passenger, .passenger])
+        #expect(ordered.coaches.map(\.id) == Array(0..<7))
+        #expect(ordered.coaches.allSatisfy { $0.group == 0 })
+        #expect(ordered.travelsTowardsPlatformEnd == false && ordered.reversals == ["Köln Hbf"])
+        #expect(ordered.source == .seatPicker)
+        // Planned coaches the seat picker doesn't have aren't added; a plan numbered otherwise changes nothing.
+        #expect(!ordered.coaches.contains { $0.number == "4" && $0.kind == .passenger })
+        vagonweb.coaches = [coach(0, "21"), coach(1, "22"), coach(2, "23")]
+        #expect(picker.ordered(like: vagonweb) == picker)
+    }
+
+    /// The seat picker's ride for a Wagenreihung: from the stop to the train's next one, planned times.
+    @Test func seatRequestForAFormationRequest() throws {
+        let berlin = station("8011160", "Berlin Hbf"), spandau = station("8010404", "Berlin-Spandau"), hamburg = station("8002549", "Hamburg Hbf")
+        let departure = Date(timeIntervalSince1970: 1_800_000_000)
+        let request = BahnDeClient.FormationRequest(category: "ICE", number: "804", station: berlin, plannedDeparture: departure)
+        #expect(BahnDeClient.seatRequest(for: request, travelClass: .second) == nil)
+        let stops = [BahnDeClient.RideStop(station: station("8011113", "Berlin Südkreuz"), departure: departure - 600, arrival: nil),
+                     BahnDeClient.RideStop(station: berlin, departure: departure, arrival: departure - 120),
+                     BahnDeClient.RideStop(station: spandau, departure: nil, arrival: nil),
+                     BahnDeClient.RideStop(station: hamburg, departure: nil, arrival: departure + 6000)]
+        let withNext = BahnDeClient.withNextStop(request, in: stops)
+        #expect(withNext.nextStop == hamburg && withNext.nextArrival == departure + 6000)
+        let seats = try #require(BahnDeClient.seatRequest(for: withNext, travelClass: .first))
+        #expect(seats.origin == berlin && seats.destination == hamburg && seats.plannedArrival == departure + 6000 && seats.travelClass == .first)
+        // Regional trains have no seats to reserve.
+        var regional = withNext
+        regional.category = "RE"
+        #expect(BahnDeClient.seatRequest(for: regional, travelClass: .second) == nil)
+    }
+
     /// The request as bahn.de's booking sends it, times in German local time, everything escaped in `data`.
     @Test func seatPickerURL() throws {
         let departure = try #require(JSONDecoding.parseISODate("2026-11-05T04:27:00Z"))

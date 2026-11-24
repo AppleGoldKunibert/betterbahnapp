@@ -144,7 +144,9 @@ struct CoachSequenceDisclosure: View {
                     continue
                 }
                 if sequence == nil, let plannedRequest {
-                    sequence = await model.plannedCoachSequence(for: plannedRequest)
+                    // A leg's ride is the one its seat map asks the seat picker for, so both share the answer.
+                    let seats = seatsLeg.flatMap { BahnDeClient.seatRequest(for: $0, travelClass: model.settings.travelClass) }
+                    sequence = await model.plannedCoachSequence(for: plannedRequest, seats: seats)
                 }
                 // Only once the plan has answered, so the notice doesn't flash before it.
                 liveMissing = missing
@@ -255,7 +257,7 @@ struct CoachSequencePanel: View {
                     }
                     let suggested = coachAdvice.map(sequence.coachIDs(for:)) ?? []
                     let seen = sequence.asSeenFromPlatform(side: platformSide)
-                    CoachSequenceDiagram(sequence: seen, reservation: reservation, seatsLeg: sequence.source == .bahnDe ? seatsLeg : nil,
+                    CoachSequenceDiagram(sequence: seen, reservation: reservation, seatsLeg: sequence.source == .bahnDe || sequence.source == .seatPicker ? seatsLeg : nil,
                                          highlightedCoachID: reservation.flatMap { reservation in
                         switch sequence.position(ofCoach: reservation.coach, train: reservation.trainName) {
                         case .sectors(_, let id), .noSectors(let id): id
@@ -312,7 +314,7 @@ struct CoachSequencePanel: View {
             #endif
             // bahn.de flags nearly every train as differing, so compare with the plan here.
             if let sequence, sequence.source == .bahnDe, !sequence.coaches.isEmpty,
-               let plan = await model.plannedCoachSequence(for: request, direction: false) {
+               let plan = await model.plannedCoachSequence(for: request, direction: false, vagonwebOnly: true) {
                 deviations = sequence.deviations(fromPlan: plan)
             }
         }
@@ -338,8 +340,10 @@ struct CoachSequencePanel: View {
             Text([station.displayName, sequence.platform.map { String(localized: "Gleis \($0)") }].compactMap(\.self).joined(separator: " · "))
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
-            if case .vagonweb(let from, let until) = sequence.source {
-                plannedNote(sequence, from: from, until: until)
+            switch sequence.source {
+            case .vagonweb(let from, let until): plannedNote(sequence, from: from, until: until)
+            case .seatPicker: plannedNote(sequence, from: nil, until: nil)
+            case .bahnDe: EmptyView()
             }
             if bikeMode == .bike, let bikes = sequence.bikeCoachSummary {
                 InfoChip(text: String(localized: "Fahrradstellplätze: \(bikes)"), systemImage: "bicycle", tint: .punctual)
@@ -366,9 +370,9 @@ struct CoachSequencePanel: View {
         }
     }
 
-    /// vagonweb's plan is for the whole train, not this stop: no platform positions, and the real
-    /// train can differ (bahn.de has the actual one in the hours before departure). Turned round when
-    /// the train changed direction on the way; without its stops the direction is unknown.
+    /// The plan (vagonweb's, or bahn.de's seat picker's in vagonweb's order) has no platform positions, and the
+    /// real train can differ (bahn.de has the actual one in the hours before departure). Turned round when the
+    /// train changed direction on the way; without its stops or vagonweb's plan the direction is unknown.
     private func plannedNote(_ sequence: CoachSequence, from: Date?, until: Date?) -> some View {
         let validity: String? = switch (from, until) {
         case let (from?, until?): String(localized: "gilt \(from.formatted(.dateTime.day().month(.twoDigits).year())) – \(until.formatted(.dateTime.day().month(.twoDigits).year()))")
@@ -376,7 +380,9 @@ struct CoachSequencePanel: View {
         }
         return VStack(alignment: .leading, spacing: 4) {
             InfoChip(text: String(localized: "Plan-Wagenreihung – kann abweichen"), systemImage: "calendar", tint: .secondary)
-            Text([String(localized: "Ohne Gleisabschnitte"), validity, String(localized: "Daten: vagonweb.cz")].compactMap(\.self).joined(separator: " · "))
+            Text([String(localized: "Ohne Gleisabschnitte"), validity,
+                  sequence.source == .seatPicker ? String(localized: "Daten: Sitzplatzreservierung der DB") : String(localized: "Daten: vagonweb.cz")]
+                .compactMap(\.self).joined(separator: " · "))
                 .font(.caption)
                 .foregroundStyle(.secondary)
             if sequence.travelsTowardsPlatformEnd == nil {

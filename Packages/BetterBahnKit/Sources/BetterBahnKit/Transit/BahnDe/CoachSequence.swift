@@ -85,6 +85,9 @@ public struct CoachSequence: Sendable, Hashable {
         case bahnDe
         /// vagonweb.cz's scheduled composition: the plan, without platform positions, sectors or Tz.
         case vagonweb(validFrom: Date?, validUntil: Date?)
+        /// bahn.de's seat picker: the plan of the coaches with seats to reserve, without platform positions or Tz
+        /// (`seatPickerPlan`), in vagonweb's order where it has the train (`ordered(like:)`).
+        case seatPicker
     }
 
     public var source: Source = .bahnDe

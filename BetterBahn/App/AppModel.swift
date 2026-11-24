@@ -1099,12 +1099,39 @@ final class AppModel {
         return lookup
     }
 
-    /// The planned Wagenreihung from vagonweb.cz, for when bahn.de has no coach sequence (yet), e.g.
-    /// days ahead. Without platform positions; vagonweb caches its pages itself.
-    /// Turned round where the train changes direction on the way (Kopfbahnhof, or vagonweb's note); for
-    /// that the train's stops before the request's station are needed, from the request or its trip.
-    /// - Parameter direction: false when only the coaches matter (comparing with bahn.de's sequence).
-    func plannedCoachSequence(for request: BahnDeClient.FormationRequest, direction: Bool = true) async -> CoachSequence? {
+    /// The planned Wagenreihung for when bahn.de has no coach sequence (yet), e.g. days ahead: bahn.de's seat
+    /// picker for the ride (the coaches as they are booked, so a reserved coach shows), in the order and direction of
+    /// vagonweb.cz's plan where vagonweb has the train; else vagonweb's plan alone. Without platform positions.
+    /// - Parameters:
+    ///   - direction: false when only the coaches matter.
+    ///   - seats: the seat picker's ride, e.g. a leg's (shared with its seat map); else from the request's stop to the next.
+    ///   - vagonwebOnly: vagonweb's plan alone, to compare bahn.de's sequence with: the seat picker leaves out
+    ///     coaches without seats to reserve.
+    func plannedCoachSequence(for request: BahnDeClient.FormationRequest, direction: Bool = true,
+                              seats: BahnDeClient.SeatRequest? = nil, vagonwebOnly: Bool = false) async -> CoachSequence? {
+        async let vagonweb = vagonwebCoachSequence(for: request, direction: direction)
+        guard !vagonwebOnly, let picker = await seatPickerCoachSequence(
+            seats ?? BahnDeClient.seatRequest(for: request, travelClass: settings.travelClass)) else { return await vagonweb }
+        return await vagonweb.map(picker.ordered(like:)) ?? picker
+    }
+
+    /// The seat picker's planned Wagenreihung for `request`'s ride (`BahnDeClient.seatPickerSequence`); nil without one.
+    private func seatPickerCoachSequence(_ request: BahnDeClient.SeatRequest?) async -> CoachSequence? {
+        guard let request, let bahnDe = provider.bahnDe else { return nil }
+        do {
+            let sequence = try await bahnDe.seatPickerSequence(request)
+            VagonwebBrowser.log.info("Sitzplatz-Wagenreihung \(request.category, privacy: .public) \(request.number, privacy: .public): \(sequence.map { "\($0.coaches.count) Wagen" } ?? "keine", privacy: .public)")
+            return sequence
+        } catch {
+            VagonwebBrowser.log.error("Sitzplatz-Wagenreihung \(request.category, privacy: .public) \(request.number, privacy: .public): \(String(describing: error), privacy: .public)")
+            return nil
+        }
+    }
+
+    /// vagonweb.cz's planned Wagenreihung; vagonweb caches its pages itself. Turned round where the train changes
+    /// direction on the way (Kopfbahnhof, or vagonweb's note); for that the train's stops before the request's station
+    /// are needed, from the request or its trip.
+    private func vagonwebCoachSequence(for request: BahnDeClient.FormationRequest, direction: Bool) async -> CoachSequence? {
         var route: [String]?
         if direction, let before = await stopsBefore(request) { route = before + [request.station.name] }
         do {
