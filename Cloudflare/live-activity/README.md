@@ -18,7 +18,8 @@ than asked, so the activity showed old delays and platforms until the app was op
    `TripActivityAttributes.ContentState.from`) and pushes it (`apns-push-type: liveactivity`) when it differs from
    the last one: urgent when times, platforms or warnings changed, not urgent when the activity only moved on as it
    already shows by itself. A minute after the final arrival it ends the activity ("Angekommen" stays 5 minutes)
-   and deletes the row.
+   and deletes the row. A train that gets later is followed until its real arrival; a journey whose activity
+   couldn't be ended is forgotten 30 minutes after that, at the latest 6 hours after the planned arrival.
 4. When the app comes back to the foreground it updates the activity itself again and takes it back:
    `DELETE /activities/<id> { secret }`.
 

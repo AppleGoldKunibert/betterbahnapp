@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS activities (
     journey TEXT NOT NULL,            -- the journey's trains, stops, times and platforms (JSON), with where IRIS lists them
     state TEXT,                       -- the activity's state last pushed (JSON), so only changes are sent
     next_check INTEGER NOT NULL,      -- unix seconds: when to look again
-    ends INTEGER NOT NULL,            -- unix seconds: the final arrival plus the minutes "Angekommen" shows
+    ends INTEGER NOT NULL,            -- unix seconds: the final arrival as last known (at most 6 h late) plus the minutes "Angekommen" shows
     created INTEGER NOT NULL          -- unix seconds
 );
 CREATE INDEX IF NOT EXISTS activities_next_check ON activities (next_check);
