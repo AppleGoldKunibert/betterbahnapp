@@ -42,6 +42,10 @@ struct JourneyResultsView: View {
     /// A route counts as noticeably slower than the free choice from this much extra travel time.
     private static let slowRouteThreshold: TimeInterval = 60 * 60
 
+    /// A via search pages by time, not with a provider's cursor (#571); this stands in for one while
+    /// there may be earlier or later routes.
+    private static let viaCursor = "via"
+
     init(search: ConnectionSearch) {
         self.search = search
         _searchDate = State(initialValue: search.date)
@@ -660,6 +664,9 @@ struct JourneyResultsView: View {
         do {
             var result: [Journey]
             var loadedPage: JourneyPage?
+            // A via search's stand-in cursor and where its page ends, before the ticket filter.
+            var viaPageCursor: String?
+            var viaPageEnd: Date?
             if search.via.isEmpty {
                 let loaded = try await model.provider.journeys(JourneyQuery(
                     from: search.from, to: destination, date: searchDate, isArrival: search.isArrival, cursor: cursor,
@@ -667,7 +674,7 @@ struct JourneyResultsView: View {
                 result = loaded.journeys
                 loadedPage = loaded
             } else {
-                // Routed via search has no cursor-based paging – it's a single chained search.
+                // Routed via search has no cursor-based paging: further pages search again from another time.
                 var planner = ViaRoutePlanner(provider: model.provider, products: search.products)
                 if model.settings.ignoreBoardingRulesEnabled {
                     // Each part of the route may also use trains you may not board or leave at its ends.
@@ -678,7 +685,16 @@ struct JourneyResultsView: View {
                         return await picker.journeysIgnoringBoardingRules(from: from, to: to, calls: calls)
                     }
                 }
-                result = try await planner.journeys(from: search.from, to: destination, via: search.via, date: searchDate)
+                switch page {
+                case .first:
+                    result = try await planner.journeys(from: search.from, to: destination, via: search.via, date: searchDate)
+                case .earlier:
+                    result = try await planner.journeys(from: search.from, to: destination, via: search.via, before: list(target))
+                case .later:
+                    result = try await planner.journeys(from: search.from, to: destination, via: search.via, after: list(target))
+                }
+                viaPageEnd = result.compactMap(\.departure?.planned).max()
+                viaPageCursor = result.isEmpty ? nil : Self.viaCursor
                 // Products are applied per leg by the planner; only the overall transfer limit is left.
                 if let maxTransfers = search.maxTransfers {
                     result = result.filter { $0.transfers <= maxTransfers }
@@ -694,7 +710,7 @@ struct JourneyResultsView: View {
             if target == .main { source = loadedPage?.source ?? model.provider.source }
             // Wait a moment for the lookup, so the list doesn't change right after it shows.
             // Where this page ends, before the expert option's extra trains (looked up hours ahead) join it.
-            let pageEnd = loadedPage?.journeys.compactMap(\.departure?.planned).max()
+            let pageEnd = loadedPage?.journeys.compactMap(\.departure?.planned).max() ?? viaPageEnd
             let early = await lookup?.value(within: .milliseconds(1500))
             if let early { result = applying(early, to: result) }
             switch page {
@@ -706,14 +722,14 @@ struct JourneyResultsView: View {
                 if target == .main, let first = result.first(where: { ($0.departure?.best ?? .distantFuture) > .now }) {
                     model.prepareLiveData(for: first)
                 }
-                setCursors(earlier: .some(loadedPage?.earlierCursor), later: .some(loadedPage?.laterCursor), target)
+                setCursors(earlier: .some(loadedPage?.earlierCursor ?? viaPageCursor), later: .some(loadedPage?.laterCursor ?? viaPageCursor), target)
                 extendCovered(to: pageEnd, target)
             case .earlier:
                 setList((result + list(target)).removingDuplicateIDs().removingSameTrainDuplicates(), target)
-                setCursors(earlier: .some(loadedPage?.earlierCursor), later: nil, target)
+                setCursors(earlier: .some(loadedPage?.earlierCursor ?? viaPageCursor), later: nil, target)
             case .later:
                 setList((list(target) + result).removingDuplicateIDs().removingSameTrainDuplicates(), target)
-                setCursors(earlier: nil, later: .some(loadedPage?.laterCursor), target)
+                setCursors(earlier: nil, later: .some(loadedPage?.laterCursor ?? viaPageCursor), target)
                 extendCovered(to: pageEnd, target)
             }
             setError(nil, target)

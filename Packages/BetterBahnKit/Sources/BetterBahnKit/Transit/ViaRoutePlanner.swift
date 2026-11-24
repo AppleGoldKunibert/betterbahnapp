@@ -130,6 +130,32 @@ public struct ViaRoutePlanner: Sendable {
         return Array(sorted.removingDuplicateIDs().prefix(limit))
     }
 
+    /// How far before the earliest shown departure `journeys(from:to:via:before:)` starts looking, one try after another.
+    static let earlierSteps: [TimeInterval] = [60 * 60, 3 * 60 * 60, 6 * 60 * 60]
+
+    /// Routes leaving before every one in `shown`, for "Frühere Verbindungen" (#571): a via search has no
+    /// provider cursor, so it searches again from earlier on, further back while that finds nothing new.
+    /// Empty when there is nothing to page from or nothing earlier within `earlierSteps`.
+    public func journeys(from: Station, to: Station, via: [ViaWaypoint], before shown: [Journey]) async throws -> [Journey] {
+        guard let earliest = shown.compactMap(\.departure?.planned).min() else { return [] }
+        let shownIDs = Set(shown.map(\.id))
+        for step in Self.earlierSteps {
+            let found = try await journeys(from: from, to: to, via: via, date: earliest.addingTimeInterval(-step))
+            let earlier = found.filter { !shownIDs.contains($0.id) && ($0.departure?.planned ?? .distantFuture) < earliest }
+            if !earlier.isEmpty { return earlier }
+        }
+        return []
+    }
+
+    /// Routes leaving after every one in `shown`, for "Spätere Verbindungen" (#571), searched from just after
+    /// the latest shown departure. Empty when there is nothing to page from or nothing later.
+    public func journeys(from: Station, to: Station, via: [ViaWaypoint], after shown: [Journey]) async throws -> [Journey] {
+        guard let latest = shown.compactMap(\.departure?.planned).max() else { return [] }
+        let shownIDs = Set(shown.map(\.id))
+        let found = try await journeys(from: from, to: to, via: via, date: latest.addingTimeInterval(60))
+        return found.filter { !shownIDs.contains($0.id) && ($0.departure?.planned ?? .distantPast) > latest }
+    }
+
     /// Appends `next` to `legs`, folding the two legs at the seam into one when the same train simply
     /// runs on through the via stop: without a minimum stay there there's no reason to get off, so
     /// "Train 1 A → B, Train 1 B → C" becomes "Train 1 A → C" with B as an intermediate stop.

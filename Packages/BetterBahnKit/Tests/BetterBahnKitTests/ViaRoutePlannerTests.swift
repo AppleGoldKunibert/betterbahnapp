@@ -96,4 +96,85 @@ import Testing
         #expect(journeys.count == 1)
         #expect(Set(journeys.map(\.id)).count == journeys.count)
     }
+
+    // MARK: Earlier and later routes (#571)
+
+    /// Train k runs A (dep 10 + 60k) – B – C (arr 130 + 60k) for each hour k in `hours`.
+    func hourlyProvider(hours: [Int] = Array(0..<12)) -> TimedMockProvider {
+        let mock = TimedMockProvider()
+        for k in hours {
+            let shift = Double(60 * k)
+            let train = trip("ice\(k)", "ICE \(100 + k)", [stop(a, arr: nil, dep: 10 + shift), stop(b, arr: 70 + shift, dep: 72 + shift),
+                                                         stop(c, arr: 130 + shift, dep: nil)])
+            mock.routes["\(a.name) -> \(b.name)", default: []].append(journey(train, a, b))
+            mock.routes["\(b.name) -> \(c.name)", default: []].append(journey(train, b, c))
+        }
+        return mock
+    }
+
+    /// Minutes after `base` each journey leaves.
+    func departures(_ journeys: [Journey]) -> [Double] {
+        journeys.compactMap { $0.departure.map { $0.planned.timeIntervalSince(base) / 60 } }
+    }
+
+    var via: [ViaWaypoint] { [ViaWaypoint(station: b)] }
+    var fourHoursIn: Date { base.addingTimeInterval(4 * 3600) }
+
+    @Test func laterRoutesLeaveAfterTheShownOnes() async throws {
+        let planner = ViaRoutePlanner(provider: hourlyProvider())
+        let shown = try await planner.journeys(from: a, to: c, via: via, date: fourHoursIn)
+        #expect(!shown.isEmpty)
+        let latest = departures(shown).max() ?? 0
+        let later = try await planner.journeys(from: a, to: c, via: via, after: shown)
+        #expect(!later.isEmpty)
+        #expect(departures(later).allSatisfy { $0 > latest })
+        // The next train after the latest shown one, not some hours on.
+        #expect(departures(later).min() == latest + 60)
+    }
+
+    @Test func earlierRoutesLeaveBeforeTheShownOnes() async throws {
+        let planner = ViaRoutePlanner(provider: hourlyProvider())
+        let shown = try await planner.journeys(from: a, to: c, via: via, date: fourHoursIn)
+        #expect(departures(shown).min() == 250)
+        let earlier = try await planner.journeys(from: a, to: c, via: via, before: shown)
+        #expect(Set(departures(earlier)) == [190])
+        #expect(Set(earlier.map { $0.id }).isDisjoint(with: shown.map { $0.id }))
+    }
+
+    @Test func earlierRoutesLookFurtherBackAfterAGap() async throws {
+        // Nothing runs in the two hours before the shown trains: the first try only finds those again.
+        let planner = ViaRoutePlanner(provider: hourlyProvider(hours: [0, 1, 4, 5]))
+        let shown = try await planner.journeys(from: a, to: c, via: via, date: fourHoursIn)
+        #expect(departures(shown).min() == 250)
+        let earlier = try await planner.journeys(from: a, to: c, via: via, before: shown)
+        #expect(Set(departures(earlier)) == [70])
+    }
+
+    @Test func noEarlierOrLaterRoutesWithoutAny() async throws {
+        let planner = ViaRoutePlanner(provider: hourlyProvider(hours: [4]))
+        let shown = try await planner.journeys(from: a, to: c, via: via, date: fourHoursIn)
+        #expect(departures(shown) == [250])
+        #expect(try await planner.journeys(from: a, to: c, via: via, before: shown).isEmpty)
+        #expect(try await planner.journeys(from: a, to: c, via: via, after: shown).isEmpty)
+        #expect(try await planner.journeys(from: a, to: c, via: via, after: []).isEmpty)
+    }
+}
+
+/// Journeys keyed by "<from> -> <to>", answered like a real search: the ones leaving at or after the asked time, in order.
+final class TimedMockProvider: TransitProvider, @unchecked Sendable {
+    let source: DataSource = .bahnDe
+    var routes: [String: [Journey]] = [:]
+
+    func searchStations(_ query: String) async throws -> [Station] { [] }
+
+    func journeys(_ query: JourneyQuery) async throws -> JourneyPage {
+        let found = (routes["\(query.from.name) -> \(query.to.name)"] ?? [])
+            .filter { ($0.departure?.planned ?? .distantPast) >= query.date }
+            .sorted { ($0.departure?.planned ?? .distantPast) < ($1.departure?.planned ?? .distantPast) }
+        return JourneyPage(journeys: Array(found.prefix(6)), earlierCursor: nil, laterCursor: nil, source: source)
+    }
+
+    func board(_ kind: BoardKind, at station: Station, date: Date, duration: Int, products: Set<Product>) async throws -> [BoardEntry] { [] }
+
+    func trip(id: String) async throws -> Trip { throw TransitError.notFound(id) }
 }
