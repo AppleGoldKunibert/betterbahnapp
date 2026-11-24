@@ -34,6 +34,7 @@ public enum DBOrder {
                                   (.return, order.gesamtangebot?.rueckfahrt)] {
             guard let part else { continue }
             let connection = (part.verbindung?.verbindungsAbschnitte ?? []).compactMap(Self.leg)
+            let checkin = Self.komfortCheckin(part.verbindung)
             let seatSections = (part.sitzplatzAngebote ?? []).flatMap { $0.abschnitte ?? [] }
             let seats = seatSections.compactMap(\.reservierung).map(Self.seat)
             for offer in part.angebote ?? [] where offer.isStorniert != true {
@@ -65,7 +66,8 @@ public enum DBOrder {
                     connection: connection,
                     seats: seats.filter { seat in coveredTrains.contains { seat.train.hasSuffix($0) } },
                     barcode: barcodes[bundle],
-                    fetchedAt: fetchedAt))
+                    fetchedAt: fetchedAt,
+                    komfortCheckin: checkin))
             }
             // Reservations booked on their own (e.g. with a BahnCard 100 or from a contingent) have no
             // ticket offer, only seat offers with their own "Leistungsbündel".
@@ -106,7 +108,8 @@ public enum DBOrder {
                     seats: sections.compactMap(\.reservierung).map(Self.seat),
                     barcode: barcodes[bundle],
                     fetchedAt: fetchedAt,
-                    reservationOnly: true))
+                    reservationOnly: true,
+                    komfortCheckin: checkin))
             }
         }
         guard !tickets.isEmpty else { throw ReadError.noTickets }
@@ -121,6 +124,19 @@ public enum DBOrder {
               let last = connection[first...].firstIndex(where: { Station.normalize($0.destinationName) == end })
         else { return connection }
         return Array(connection[first...last])
+    }
+
+    /// The trains of the connection that take part in the Komfort-Check-in, with bahn.de's section
+    /// index (walks count too) for the check-in request.
+    static func komfortCheckin(_ connection: Connection?) -> KomfortCheckin? {
+        guard let connection, let tripUUID = connection.tripUUID, !tripUUID.isEmpty else { return nil }
+        let legs = (connection.verbindungsAbschnitte ?? []).enumerated().compactMap { offset, section -> KomfortCheckin.Leg? in
+            guard let status = section.checkinStatus?.status, status.isAvailable || status.isCheckedIn,
+                  let train = Self.leg(section) else { return nil }
+            return KomfortCheckin.Leg(index: section.idx ?? offset, trainName: train.trainName, trainNumber: train.trainNumber,
+                                      departure: train.departure, arrival: train.arrival, status: status)
+        }
+        return legs.isEmpty ? nil : KomfortCheckin(tripUUID: tripUUID, legs: legs)
     }
 
     // MARK: - Mapping
@@ -288,6 +304,8 @@ public enum DBOrder {
 
     struct Connection: Decodable {
         var verbindungsAbschnitte: [Section]?
+        /// The connection's ID for the Komfort-Check-in.
+        var tripUUID: String?
     }
 
     struct Time: Decodable { var sollzeit: String? }
@@ -320,6 +338,9 @@ public enum DBOrder {
         var verkehrsmittel: Vehicle?
         /// Some sections carry their type here instead of on `verkehrsmittel`.
         var typ: String?
+        /// The section's index, the "legIdx" of a Komfort-Check-in.
+        var idx: Int?
+        var checkinStatus: KomfortCheckin.RawStatus?
     }
 
     struct Validity: Decodable {
