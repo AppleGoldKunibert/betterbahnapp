@@ -56,8 +56,9 @@ public struct WalletPassPayload: Encodable, Sendable, Hashable {
 
         var pass = BoardingPass()
         if let first {
+            // The day at the origin station, like the "Ab" time below and the printed ticket.
             pass.headerFields = [Field(key: "date", label: String(kit: "Datum"),
-                                       value: first.departure.formatted(Self.dateStyle))]
+                                       value: first.departure.formatted(Self.dateStyle(for: first.originEVA)))]
         }
         pass.primaryFields = [
             Field(key: "from", label: first.map { String(kit: "Ab %@", $0.departure.formatted(Self.timeStyle(for: $0.originEVA))) },
@@ -137,6 +138,12 @@ public struct WalletPassPayload: Encodable, Sendable, Hashable {
     private static var dateStyle: Date.FormatStyle {
         Date.FormatStyle(date: .abbreviated, time: .omitted, locale: KitLocalization.locale,
                          timeZone: TimeZone(identifier: "Europe/Berlin")!)
+    }
+
+    /// Dates in the station's own zone, as on the ticket.
+    private static func dateStyle(for eva: String?) -> Date.FormatStyle {
+        Date.FormatStyle(date: .abbreviated, time: .omitted, locale: KitLocalization.locale,
+                         timeZone: DBOrder.timeZone(forEVA: eva))
     }
 
     private static var berlinTime: Date.FormatStyle {
