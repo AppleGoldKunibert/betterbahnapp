@@ -9993,6 +9993,166 @@
           }
         }
       }
+    },
+    "Komfort-Check-in" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Comfort Check-in"
+          }
+        }
+      }
+    },
+    "Check dich ein, dann wird dein Ticket meist nicht mehr kontrolliert." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Check in and your ticket usually won't be inspected."
+          }
+        }
+      }
+    },
+    "Umchecken" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Change Seat"
+          }
+        }
+      }
+    },
+    "Eingecheckt: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Checked in: %@"
+          }
+        }
+      }
+    },
+    "bahn.de möchte die Suche bestätigen. Bitte schließ sie auf der Seite ab, danach checkt BetterBahn dich ein." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "bahn.de wants to confirm the search. Please finish it on the page, then BetterBahn checks you in."
+          }
+        }
+      }
+    },
+    "Du bist eingecheckt." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You're checked in."
+          }
+        }
+      }
+    },
+    "Du bist eingecheckt: %@." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You're checked in: %@."
+          }
+        }
+      }
+    },
+    "Dein Ticket kann trotzdem stichprobenartig kontrolliert werden." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your ticket may still be spot-checked."
+          }
+        }
+      }
+    },
+    "Platz" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Seat"
+          }
+        }
+      }
+    },
+    "Neuer Sitzplatz" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "New Seat"
+          }
+        }
+      }
+    },
+    "Dein reservierter Platz ist schon eingetragen. Sitzt du woanders, trag diesen Platz ein." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your reserved seat is already filled in. If you're sitting elsewhere, enter that seat."
+          }
+        }
+      }
+    },
+    "Trag den Platz ein, auf dem du sitzt." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enter the seat you're sitting in."
+          }
+        }
+      }
+    },
+    "BahnCard-Nummer" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "BahnCard number"
+          }
+        }
+      }
+    },
+    "Du hast mit BahnCard gebucht, deshalb braucht bahn.de ihre Nummer. Beides bleibt nur auf diesem Gerät." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You booked with a BahnCard, so bahn.de needs its number. Both stay on this device only."
+          }
+        }
+      }
+    },
+    "Damit öffnet bahn.de deine Buchung. Der Name bleibt nur auf diesem Gerät." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "bahn.de opens your booking with it. The name stays on this device only."
+          }
+        }
+      }
+    },
+    "Wird eingecheckt …" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Checking in …"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"
