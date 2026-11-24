@@ -141,7 +141,7 @@ public enum DBOrderPage {
             let message = (dictionary["response"] as? String).flatMap { checkinErrorMessage(in: Data($0.utf8)) }
             if let message { throw Failure.checkinRefused(message) }
             switch status {
-            case 401: throw Failure.notFound
+            case 401: throw Failure.sessionExpired
             case 403, 429: throw Failure.blocked
             default: throw Failure.http(status)
             }
@@ -164,6 +164,8 @@ public enum DBOrderPage {
         case notFound
         case http(Int)
         case unreadable
+        /// bahn.de no longer accepts the page's session (it lasts a few minutes).
+        case sessionExpired
         /// bahn.de turned the Komfort-Check-in down with this reason.
         case checkinRefused(String)
 
@@ -174,6 +176,7 @@ public enum DBOrderPage {
             case .notFound: String(kit: "Zu dieser Auftragsnummer und diesem Namen wurde keine Buchung gefunden.")
             case .http(let status): String(kit: "bahn.de hat mit einem Fehler geantwortet (%lld).", status)
             case .unreadable: String(kit: "Die Antwort von bahn.de konnte nicht gelesen werden.")
+            case .sessionExpired: String(kit: "Die Sitzung bei bahn.de ist abgelaufen. Bitte versuch es noch mal.")
             case .checkinRefused(let message): message
             }
         }

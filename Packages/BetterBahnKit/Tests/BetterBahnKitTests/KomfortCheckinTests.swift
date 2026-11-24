@@ -75,6 +75,9 @@ import Testing
         #expect(throws: DBOrderPage.Failure.checkinRefused("Platz ist belegt")) {
             try DBOrderPage.checkinStatus(from: ["state": "error", "status": 400, "response": #"{"message":"Platz ist belegt"}"#] as [String: Any])
         }
+        #expect(throws: DBOrderPage.Failure.sessionExpired) {
+            try DBOrderPage.checkinStatus(from: ["state": "error", "status": 401, "response": ""] as [String: Any])
+        }
         #expect(throws: DBOrderPage.Failure.http(500)) {
             try DBOrderPage.checkinStatus(from: ["state": "error", "status": 500, "response": "oops"] as [String: Any])
         }

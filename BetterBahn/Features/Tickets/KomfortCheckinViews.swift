@@ -276,12 +276,18 @@ struct KomfortCheckinView: View {
         isCheckingIn = true
         defer { isCheckingIn = false }
         state = .working
-        guard let checkin = target.ticket.ticket.komfortCheckin else { return }
+        guard let checkin = target.ticket.ticket.komfortCheckin else {
+            state = .failed(DBOrderPage.Failure.unreadable.localizedDescription)
+            return
+        }
         let request = checkin.request(for: target.leg, bundleID: target.ticket.ticket.bundleID,
                                       seats: [KomfortCheckin.Seat(coach: coach.trimmed, seat: seat.trimmed)],
                                       bahnCardNumber: needsBahnCard ? bahnCard : nil,
                                       ticketReservation: reservedSeatOnTicket)
-        guard let body = try? request.json() else { return }
+        guard let body = try? request.json() else {
+            state = .failed(DBOrderPage.Failure.unreadable.localizedDescription)
+            return
+        }
         for attempt in 0..<10 {
             do {
                 let value = try await page.callJavaScript(DBOrderPage.checkinScript, arguments: ["body": body])
