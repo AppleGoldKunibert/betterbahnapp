@@ -60,7 +60,8 @@ public enum PassengerRights {
 
     /// The claim for a journey that has arrived, or nil when there is none or it can't be told.
     ///
-    /// The delay is measured against the arrival of the plan as it was first booked: `earlierPlans`
+    /// The delay is measured at the last train's arrival, so a walk at the end (which never gets live
+    /// times) doesn't hide it, against the arrival of the plan as it was first booked: `earlierPlans`
     /// (newest first, as `SavedJourney.previousVersions`) that ended at the same place count, so a
     /// cancellation or missed connection that led to a later arrival is included.
     ///
@@ -69,10 +70,11 @@ public enum PassengerRights {
     /// flat 1.50 € per 60 minutes is hardly worth a form, so nothing is shown there.
     public static func claim(for journey: Journey, earlierPlans: [Journey] = [], hasTicket: Bool,
                              hasBahnCard100: Bool, now: Date = .now) -> PassengerRightsClaim? {
-        guard let last = journey.legs.last, !last.cancelled, let arrival = journey.arrival else { return nil }
+        guard let last = journey.transitLegs.last, !last.cancelled else { return nil }
+        let arrival = last.arrival
         let original = bookedPlan(replacedBy: journey, earlierPlans: earlierPlans)
         let baseline = original ?? journey
-        guard let planned = baseline.arrival?.planned else { return nil }
+        guard let planned = baseline.transitLegs.last?.arrival.planned else { return nil }
         // Without live data nothing is known about the real arrival, unless a replacement was chosen.
         guard arrival.actual != nil || original != nil else { return nil }
         let actual = arrival.best
@@ -132,12 +134,14 @@ public enum PassengerRights {
         let original = bookedPlan(replacedBy: journey, earlierPlans: earlierPlans)
         let booked = original ?? journey
         var fields: [RequestField] = []
-        if let departure = booked.departure?.planned { fields.append(RequestField(label: String(kit: "Reisedatum"), value: day(departure))) }
-        if let first = booked.legs.first, let last = booked.legs.last {
-            fields.append(RequestField(label: String(kit: "Von"), value: first.origin.displayName))
-            fields.append(RequestField(label: String(kit: "Nach"), value: last.destination.displayName))
+        // Walks at the start or end aside: the form asks for the stations and times of the trains.
+        let firstTrain = booked.transitLegs.first, lastTrain = booked.transitLegs.last
+        if let departure = firstTrain?.departure.planned { fields.append(RequestField(label: String(kit: "Reisedatum"), value: day(departure))) }
+        if let firstTrain, let lastTrain {
+            fields.append(RequestField(label: String(kit: "Von"), value: firstTrain.origin.displayName))
+            fields.append(RequestField(label: String(kit: "Nach"), value: lastTrain.destination.displayName))
         }
-        if let departure = booked.departure?.planned { fields.append(RequestField(label: String(kit: "Geplante Abfahrt"), value: time(departure))) }
+        if let departure = firstTrain?.departure.planned { fields.append(RequestField(label: String(kit: "Geplante Abfahrt"), value: time(departure))) }
         let bookedTrains = trains(of: booked)
         if original == nil {
             if !bookedTrains.isEmpty { fields.append(RequestField(label: String(kit: "Züge"), value: bookedTrains)) }
