@@ -142,10 +142,10 @@ public struct JourneyWeather: Sendable, Hashable {
         self.transfers = transfers
     }
 
-    /// What a leg's card shows where the leg arrives: the destination's forecast on the journey's last leg,
-    /// a long transfer's on the others.
+    /// What a leg's card shows where the leg arrives: the destination's forecast on the journey's last train
+    /// (a walk after it has no card of its own, #541), a long transfer's on the others.
     public func arrival(of leg: Leg, in journey: Journey) -> LegArrivalWeather? {
-        if leg.id == journey.legs.last?.id {
+        if leg.id == journey.transitLegs.last?.id {
             return destination.map { LegArrivalWeather(forecast: $0, atDestination: true) }
         }
         return transfers[leg.id].map { LegArrivalWeather(forecast: $0, atDestination: false) }
