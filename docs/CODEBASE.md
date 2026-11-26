@@ -598,8 +598,9 @@ in `project.pbxproj`: new files join their target automatically.
   ignores sectors/bus bays), `TrainRoutePlanner`, `ViaRoutePlanner` (vias without stay keep a through train as one
   leg), `TrainPicker` ("Anderer Zug": `replacing` + `MissedConnection` #226, `reroutes` "Andere Routenführung",
   `journeysIgnoringBoardingRules`, `journeysContinuingFromRestrictedTrains`, both added in `JourneyResultsView`),
-  `StationCalls` (hides routes doubling back through origin/destination; not for vias), `TicketFilter`/`BC100Rules`,
-  `BoardFilter`, `ManualStop` (`Stopover.manual`, `isManual` survives refreshes unlike `isAdditional`;
+  `StationCalls` (hides routes doubling back through origin/destination; not for vias), `TicketFilter`/`BC100Rules`
+  (abroad by `CrossBorder`/`Station.countryCode`; ÖBB's parent stations "at-Railway-…_Pde:…" read as German via
+  `Station.feedStopID`, also for DHIDs and the year review), `BoardFilter`, `ManualStop` (`Stopover.manual`, `isManual` survives refreshes unlike `isAdditional`;
   `Trip.inserting(manualStop:boardingAt:)`).
 
 - `Commute/` (#397) – `RegularTrip` (template without live data, ISO weekdays, `questionLead`, `delayThreshold`, `pausedUntil`;

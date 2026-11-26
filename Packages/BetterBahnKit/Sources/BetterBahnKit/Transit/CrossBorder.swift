@@ -8,8 +8,7 @@ extension Station {
         if let country { return country.uppercased() }
         if let code = TrainSearchCountry.code(eva: evaNumber) { return code }
         if id.hasPrefix(TransitousProvider.czechTimetableFeed) { return "CZ" }
-        let local = id.split(separator: "_", maxSplits: 1).last ?? Substring(id)
-        let parts = local.split(separator: ":")
+        let parts = Self.feedStopID(id).split(separator: ":")
         for part in parts where part.allSatisfy(\.isNumber) {
             let digits = part.drop { $0 == "0" }
             if digits.count == 7, let code = TrainSearchCountry.uicCodes[String(digits.prefix(2))] { return code }
@@ -26,6 +25,19 @@ extension Station {
             return feed.uppercased()
         }
         return nil
+    }
+
+    /// The feed's own ID of a Transitous stop, without the feed in front: "de:11000:900003201" for
+    /// "de-DELFI_de:11000:900003201". ÖBB's reference data marks a parent station with a "P" before its
+    /// IFOPT ("at-Railway-…_Pde:11000:900058101", Berlin Südkreuz), which is left out, so the stop reads
+    /// as German and not as the feed's Austria.
+    static func feedStopID(_ id: String) -> Substring {
+        let local = id.split(separator: "_", maxSplits: 1).last ?? Substring(id)
+        guard local.first == "P", let colon = local.firstIndex(of: ":") else { return local }
+        let country = local[local.index(after: local.startIndex)..<colon]
+        guard country.count == 2, country.allSatisfy(\.isLowercase),
+              TrainSearchCountry.uicCodes.values.contains(country.uppercased()) else { return local }
+        return local.dropFirst()
     }
 }
 

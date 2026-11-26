@@ -263,8 +263,10 @@ public enum StationNames {
     /// The stop area's DHID in a stop ID, as `scripts/make-station-names.py` writes it: "de:14612:16" in
     /// "de-DELFI_de:14612:16", "de-DELFI_de:14628:3620:5:Gleis3" or "…_de:11000:900003200:1:51";
     /// "de:08135:620" in "de-DELFI_de:08135:0620"; "de:05116:23007" in Transitous' grouped stop
-    /// "de-DELFI_de:05116:23007_G" (Mönchengladbach Hbf, whose stops are all "MG Hbf /Europaplatz").
+    /// "de-DELFI_de:05116:23007_G" (Mönchengladbach Hbf, whose stops are all "MG Hbf /Europaplatz"); also
+    /// a parent station of ÖBB's reference data, "…_Pde:11000:900058101" (see `Station.feedStopID`).
     static func dhid(in id: String) -> String? {
+        let id = id.replacingOccurrences(of: "_Pde:", with: "_de:")
         guard let start = id.range(of: "de:") else { return nil }
         if start.lowerBound != id.startIndex {
             let before = id[id.index(before: start.lowerBound)]
