@@ -166,9 +166,36 @@ public final class CombinedProvider: TransitProvider {
             let others = hits.filter { $0.products.isEmpty || !Set($0.products).isSubset(of: busOnly) }
             if !others.isEmpty { hits = others }
         }
-        let stations = search.ordered(search.filtered(hits.map(\.station)), near: location)
+        let stations = search.ordered(search.filtered(Self.mergingStationParts(hits).map(\.station)), near: location)
         return stations.isEmpty ? nil : stations
     }
+
+    /// bahn.de's hits with every part of a railway station that is also listed left out, as its board covers them all
+    /// (`DBBoardProvider`): another level ("Berlin Hbf (S-Bahn)" next to Berlin Hbf, `StationNames.levels(of:)`) and
+    /// the stops bahn.de bundles at it under their own number, which list the station's trains
+    /// ("Gesundbrunnen Bahnhof (S+U), Berlin" right next to Berlin Gesundbrunnen).
+    static func mergingStationParts(_ hits: [BahnDeClient.Candidate]) -> [BahnDeClient.Candidate] {
+        let stations = hits.filter { $0.hasTrains && Self.isRailwayStation($0.station) }
+        var kept: [BahnDeClient.Candidate] = []
+        for hit in hits {
+            if let eva = hit.station.evaNumber,
+               kept.contains(where: { $0.station.evaNumber.map(StationNames.levels(of:))?.contains(eva) == true }) { continue }
+            if !Self.isRailwayStation(hit.station), hit.hasTrains, let coordinate = hit.station.coordinate,
+               stations.contains(where: { ($0.station.coordinate?.distance(to: coordinate) ?? .infinity) < Self.stationPartRadius }) {
+                continue
+            }
+            kept.append(hit)
+        }
+        return kept
+    }
+
+    /// A railway station's own EVA number has 7 digits; bahn.de's local stops have shorter numbers.
+    static func isRailwayStation(_ station: Station) -> Bool {
+        station.id.count == 7 && station.id.allSatisfy(\.isNumber)
+    }
+
+    /// How far a stop bahn.de bundles at a station may be from it.
+    static let stationPartRadius: Double = 400
 
     /// Searches bahn.de takes as well as Transitous: not one or two letters, not a RIL100 code ("FF"), not just
     /// words for "station", which Transitous answers with the station nearby.

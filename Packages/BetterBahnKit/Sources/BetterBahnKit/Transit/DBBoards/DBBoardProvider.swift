@@ -66,8 +66,9 @@ public struct DBBoardProvider: Sendable {
         let line = line(category: category, number: number, lineName: stop.lineName)
         let planned = event.planned ?? event.actual ?? .now
         let reference = IRISTripReference(category: category, number: number, eva: found.eva, planned: planned, kind: kind)
+        let otherEnd = kind == .departures ? event.path.last : event.path.first
         return BoardEntry(kind: kind, tripId: reference.id, station: station, line: line,
-                          otherEnd: kind == .departures ? event.path.last : event.path.first,
+                          otherEnd: otherEnd.map { StationNames.displayName(ofDBStop: $0) },
                           time: TimeInfo(planned: planned, actual: event.actual),
                           platform: PlatformInfo(planned: event.plannedPlatform, actual: event.actualPlatform),
                           cancelled: event.cancelled,
@@ -115,8 +116,12 @@ public struct DBBoardProvider: Sendable {
     static func entry(_ item: RISBoardsClient.Item, kind: BoardKind, station: Station) -> BoardEntry {
         let line = RISRoutingProvider.line(item.transport.routing, operatorName: item.administration?.operatorName)
         let live = item.timeType != nil && item.timeType != "SCHEDULE"
+        let otherEnd = kind == .departures ? item.transport.destination : item.transport.origin
         return BoardEntry(kind: kind, tripId: item.journeyID, station: station, line: line,
-                          otherEnd: kind == .departures ? item.transport.destination?.name : item.transport.origin?.name,
+                          otherEnd: otherEnd?.name.map {
+                              StationNames.displayName(ofDBStop: $0, evaNumber: otherEnd?.evaNumber, dhid: otherEnd?.ifopt,
+                                                       boardName: station.displayName)
+                          },
                           time: TimeInfo(planned: item.timeSchedule, actual: live ? item.time : nil),
                           platform: PlatformInfo(planned: item.platformSchedule, actual: item.platform),
                           cancelled: item.canceled == true, terminatesOrOriginatesHere: nil,
@@ -190,7 +195,12 @@ public struct RISBoardsClient: Sendable {
         var transport: Transport
         struct Message: Decodable { var text: String? }
         struct Administration: Decodable { var operatorName: String? }
-        struct Place: Decodable { var name: String? }
+        struct Place: Decodable {
+            var name: String?
+            var evaNumber: String?
+            /// The stop's DHID, "de:11000:900079221" (Berlin Hermannstraße), sometimes with its level ("…:5").
+            var ifopt: String?
+        }
         struct Transport: Decodable {
             var type: String?
             var category: String?

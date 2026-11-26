@@ -88,8 +88,9 @@ public struct Station: Codable, Sendable, Hashable, Identifiable {
     ]
 
     /// Parenthesized level qualifiers of stations split across levels, e.g. Stuttgart's
-    /// "Hauptbahnhof (oben)" / "Hauptbahnhof (tief)" - dropped, since both are the same station.
-    private static let levelQualifiers: Set<String> = ["oben", "tief", "unten"]
+    /// "Hauptbahnhof (oben)" / "Hauptbahnhof (tief)", DB's "Berlin Hbf (S-Bahn)" and "Berlin Gesundbrunnen(S)" -
+    /// dropped, since all are the same station.
+    private static let levelQualifiers: Set<String> = ["oben", "tief", "unten", "s", "s-bahn"]
 
     /// Parenthesized notes some feeds tack on that say nothing about the place itself, e.g.
     /// "Rosenheim (DE)", "Stralsund-Grünhufe (DB)", "Fulda (FlixTrain)" - dropped.
@@ -131,14 +132,22 @@ public struct Station: Codable, Sendable, Hashable, Identifiable {
     /// and has to stay where it is instead of becoming "b. Leipzig-Böhlen".
     static func displayName(for rawName: String) -> String {
         var name = rawName.trimmingCharacters(in: .whitespaces)
+        // bahn.de and DB's RIS name a local stop "<stop> (<lines>), <town>" ("Leopoldplatz (U), Berlin"):
+        // read like VBB's "U Leopoldplatz (Berlin)", so it ends up as "Berlin-Leopoldplatz" below.
+        if let local = localStop(name), let mark = local.mark {
+            var stop = local.stop
+            if stop.hasSuffix(" Bahnhof") { stop = String(stop.dropLast(" Bahnhof".count)) + " Bhf" }
+            name = local.town.contains("(") ? "\(local.town) \(stop)" : "\(mark) \(stop) (\(local.town))"
+        }
         // DELFI names many stations "<town>, Bahnhof" ("Friesack (Mark), Bahnhof") - the town alone
         // is what DB calls them.
         if name.hasSuffix(", Bahnhof") {
             name.removeLast(", Bahnhof".count)
             name = delfiTownNames[name] ?? name
         }
-        // DB's own names leave out the spaces around brackets ("Bernau(b Berlin)", "Frankfurt(Main)Hbf").
-        name = name.replacingOccurrences(of: #"(?<=\p{L})\("#, with: " (", options: .regularExpression)
+        // DB's own names leave out the spaces around brackets ("Bernau(b Berlin)", "Frankfurt(Main)Hbf",
+        // "Berlin Yorckstr.(S2)").
+        name = name.replacingOccurrences(of: #"(?<=[\p{L}.])\("#, with: " (", options: .regularExpression)
             .replacingOccurrences(of: #"\)(?=\p{L})"#, with: ") ", options: .regularExpression)
 
         while name.hasSuffix(")"), let openParen = name.range(of: " (", options: .backwards) {
@@ -186,4 +195,23 @@ public struct Station: Codable, Sendable, Hashable, Identifiable {
     }
 
     private static let abroadMainStations = [(" hlavní nádraží", " hl.n."), (" hlavná stanica", " hl.st.")]
+
+    /// A local stop as bahn.de and DB's RIS name it, "<stop>, <town>", with the railway lines stopping there in
+    /// brackets ("Leopoldplatz (U), Berlin", "Hermannstr.(S+U), Berlin", "Nordbahnhof (S)/Gartenstr., Berlin"):
+    /// the stop without them, the town and the first of them ("U"). Without lines only with `requiringMark` off,
+    /// as DELFI writes the town first ("Berlin, Tunnelstr."); nil for any other name.
+    static func localStop(_ name: String, requiringMark: Bool = true) -> (stop: String, town: String, mark: String?)? {
+        guard let comma = name.range(of: ", ", options: .backwards) else { return nil }
+        let town = String(name[comma.upperBound...]).trimmingCharacters(in: .whitespaces)
+        var stop = String(name[..<comma.lowerBound])
+        let marks = stop.matches(of: localStopMark)
+        guard !town.isEmpty, !marks.isEmpty || !requiringMark else { return nil }
+        let mark = marks.first.map { String($0.output.1) }
+        stop = stop.replacing(localStopMark, with: "").replacingOccurrences(of: "  ", with: " ")
+            .trimmingCharacters(in: .whitespaces)
+        return stop.isEmpty ? nil : (stop, town, mark)
+    }
+
+    /// The lines of a local stop in bahn.de's and RIS' names: "(S+U)", "(U)", "(S)".
+    private static var localStopMark: Regex<(Substring, Substring)> { /\s?\((S\+U|U|S)\)/ }
 }

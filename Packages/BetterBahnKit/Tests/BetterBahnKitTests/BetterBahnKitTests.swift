@@ -2471,6 +2471,50 @@ private final class TwinTrainProtocol: URLProtocol, @unchecked Sendable {
             == "Mönchengladbach Hbf")
     }
 
+    /// DB keeps the S-Bahn of Berlin's big stations as stations of their own, which DB Timetables' `/station`
+    /// doesn't name: the offline list has them, so a board asks every level.
+    @Test func boardAsksEveryLevelOfTheStation() {
+        #expect(StationNames.levels(of: "8011102") == ["8011102", "8089015"])
+        #expect(StationNames.levels(of: "8089015") == ["8011102", "8089015"])
+        #expect(TimetablesClient.knownLevels(of: "8011102") == ["8011102", "8089015"])
+        #expect(Set(TimetablesClient.knownLevels(of: "8011160")) == ["8011160", "8098160", "8089021"])
+        #expect(TimetablesClient.knownLevels(of: "123") == ["123"])
+    }
+
+    /// Stops from DB Timetables' paths and RIS::Boards read like the app's other names: DB's station (by DHID, EVA
+    /// number, or name without its level), else a local stop without its lines and the board's own town.
+    @Test func dbStopsShowDBsNames() {
+        #expect(StationNames.displayName(ofDBStop: "Hermannstr.(S+U), Berlin", evaNumber: "732126",
+                                         dhid: "de:11000:900079221") == "Berlin Hermannstraße")
+        #expect(StationNames.displayName(ofDBStop: "Berlin Hbf (S-Bahn)", evaNumber: "8089522",
+                                         dhid: "de:11000:900003200:5") == "Berlin Hbf")
+        #expect(StationNames.displayName(ofDBStop: "Berlin Südkreuz (S)") == "Berlin Südkreuz")
+        #expect(StationNames.displayName(ofDBStop: "Berlin Storkower Str") == "Berlin Storkower Straße")
+        #expect(StationNames.displayName(ofDBStop: "Berlin Anhalter Bf") == "Berlin Anhalter Bahnhof")
+        #expect(StationNames.displayName(ofDBStop: "Dortmund Hbf") == "Dortmund Hbf")
+        #expect(StationNames.displayName(ofDBStop: "Leopoldplatz (U), Berlin", evaNumber: "730834", dhid: "de:11000:900009102",
+                                         boardName: "Berlin Gesundbrunnen") == "Leopoldplatz")
+        #expect(StationNames.displayName(ofDBStop: "Bernauer Str. (U)/Schönholzer Str., Berlin", evaNumber: "367170",
+                                         dhid: "de:11000:900007170", boardName: "Berlin Gesundbrunnen")
+            == "Bernauer Str./Schönholzer Str.")
+        // Another town stays, read like VBB's names.
+        #expect(StationNames.displayName(ofDBStop: "Leopoldplatz (U), Berlin", boardName: "Potsdam Hbf") == "Berlin-Leopoldplatz")
+        #expect(StationNames.displayName(ofDBStop: "Schwadorf, Brühl (Rheinland)", evaNumber: "442275", dhid: "de:05362:84711:1",
+                                         boardName: "Köln Hbf") == "Schwadorf, Brühl (Rheinland)")
+    }
+
+    /// bahn.de's and RIS' local stops ("<stop> (<lines>), <town>") and DB's levels read like VBB's names do.
+    @Test func bahnDeLocalStopsAndLevelsAreCleanedUp() {
+        #expect(Station.displayName(for: "Leopoldplatz (U), Berlin") == "Berlin-Leopoldplatz")
+        #expect(Station.displayName(for: "Gesundbrunnen Bahnhof (S+U), Berlin") == "Berlin Gesundbrunnen")
+        #expect(Station.displayName(for: "Berlin Gesundbrunnen(S)") == "Berlin Gesundbrunnen")
+        #expect(Station.displayName(for: "Berlin Hbf (S-Bahn)") == "Berlin Hbf")
+        #expect(Station.displayName(for: "Berlin Yorckstr.(S2)") == "Berlin Yorckstr. (S2)")
+        #expect(Station.displayName(for: "Berlin, Tunnelstr.") == "Berlin, Tunnelstr.")
+        #expect(Station.displayName(for: "Breslauer Platz/Hauptbahnhof, Köln") == "Breslauer Platz/Hbf, Köln")
+        #expect(Station.localStop("Nordbahnhof (S)/Gartenstr., Berlin")?.stop == "Nordbahnhof/Gartenstr.")
+    }
+
     /// DELFI writes some stop numbers with leading zeros, OpenStation without.
     @Test func readsTheStopAreaFromTheStopID() {
         #expect(StationNames.dhid(in: "de-DELFI_de:14612:16") == "de:14612:16")
@@ -3203,6 +3247,28 @@ final class MockProvider: TransitProvider, @unchecked Sendable {
 }
 
 @Suite struct CombinedProviderTests {
+    /// bahn.de lists a station's other level and the stops it bundles at it with the station's trains; the
+    /// station's board covers them, so the search shows the station once.
+    @Test func dbSearchShowsAStationOnce() {
+        func hit(_ id: String, _ name: String, _ lat: Double, _ lon: Double, trains: Bool = true) -> BahnDeClient.Candidate {
+            BahnDeClient.Candidate(station: Station(id: id, name: name, coordinate: Coordinate(latitude: lat, longitude: lon),
+                                                    evaNumber: id, source: .bahnDe),
+                                   hasTrains: trains, products: trains ? ["ICE", "SBAHN", "UBAHN", "BUS"] : ["BUS"])
+        }
+        let gesundbrunnen = [
+            hit("730796", "Gesundbrunnen Bahnhof (S+U), Berlin", 52.54897, 13.388264),
+            hit("8011102", "Berlin Gesundbrunnen", 52.548656, 13.39106),
+            hit("610701", "Gesundbrunnen Bahnhof Badstr., Berlin", 52.548424, 13.388507),
+            hit("8089015", "Berlin Gesundbrunnen(S)", 52.5495, 13.3881),
+            hit("308740", "Gesundbrunnen, Göttingen", 51.55108, 9.870524, trains: false),
+            hit("354610", "Gesundbrunnen, Northeim", 51.70668, 10.028761, trains: false),
+        ]
+        #expect(CombinedProvider.mergingStationParts(gesundbrunnen).map(\.station.id) == ["8011102", "308740", "354610"])
+        // Without the station in the list, its stop stays (and reads as it).
+        let alone = CombinedProvider.mergingStationParts([gesundbrunnen[0]])
+        #expect(alone.map(\.station.displayName) == ["Berlin Gesundbrunnen"])
+    }
+
     @Test func fallsBackAndCoolsDown() async throws {
         let primary = MockProvider(source: .bahnDe)
         primary.failing = true

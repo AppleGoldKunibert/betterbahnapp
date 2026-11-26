@@ -45,6 +45,8 @@ public enum StationNames {
         var abroad: [String: [StationAbroad]] = [:]
         /// Other railways' names of German stations by `aliasKey`.
         var aliases: [String: [Alias]] = [:]
+        /// Stations by `dbNameKey` of their name; -1 where several share it.
+        var byNameKey: [String: Int] = [:]
     }
 
     private struct File: Decodable {
@@ -106,6 +108,8 @@ public enum StationNames {
                                                 evas: station.evas, dhid: station.dhid))
             if !station.dhid.isEmpty { index.byDHID[station.dhid] = number }
             for eva in station.evas where index.byEVA[eva] == nil { index.byEVA[eva] = number }
+            let key = dbNameKey(station.name)
+            if !key.isEmpty { index.byNameKey[key] = index.byNameKey[key] == nil ? number : -1 }
             for cell in Set(station.points.map(cell(of:))) { index.cells[cell, default: []].append(number) }
         }
         for station in abroad {
@@ -149,6 +153,17 @@ public enum StationNames {
     /// station, like the train statistics.
     public static func mainEvaNumber(for station: Station) -> String? {
         germanStation(for: station, in: index).flatMap { index.stations[$0].evas.first }
+    }
+
+    /// Every EVA number of the DB station that has `eva`, the station's main one first: DB keeps many S-Bahn
+    /// stations as stations of their own, "Berlin Gesundbrunnen(S)" (8089015) next to Berlin Gesundbrunnen
+    /// (8011102), and DB Timetables' `/station` doesn't name them. Empty for an EVA the list doesn't know.
+    public static func levels(of eva: String) -> [String] {
+        levels(of: eva, in: index)
+    }
+
+    static func levels(of eva: String, in index: Index) -> [String] {
+        index.byEVA[eva].map { index.stations[$0].evas } ?? []
     }
 
     /// The DHID of DB's station for `station` ("de:11000:900003201" for any level of Berlin Hbf), matched like
@@ -204,6 +219,42 @@ public enum StationNames {
     public static func displayName(forName name: String, evaNumber: String? = nil) -> String {
         if let evaNumber, let number = index.byEVA[evaNumber] { return Station.displayName(for: index.stations[number].name) }
         return Station.displayName(for: nameAbroad(for: name, near: nil, in: index) ?? name)
+    }
+
+    /// A stop as DB's own data names it (a train's path in DB Timetables, a stop on RIS::Boards), as shown: DB's
+    /// station by its DHID or EVA number, else by its name without the level DB adds ("Berlin Südkreuz (S)", "Berlin
+    /// Hbf (S-Bahn)") or DB's short forms ("Berlin Storkower Str" is Berlin Storkower Straße). Any other stop is
+    /// cleaned up (`Station.displayName(for:)`); on the board of a station in the same town (`boardName`, as shown)
+    /// it leaves the town out, which local stops name last ("Leopoldplatz (U), Berlin" is "Leopoldplatz" on Berlin
+    /// Gesundbrunnen's board).
+    public static func displayName(ofDBStop name: String, evaNumber: String? = nil, dhid: String? = nil,
+                                   boardName: String? = nil) -> String {
+        displayName(ofDBStop: name, evaNumber: evaNumber, dhid: dhid, boardName: boardName, in: index)
+    }
+
+    static func displayName(ofDBStop name: String, evaNumber: String?, dhid: String?, boardName: String?,
+                            in index: Index) -> String {
+        if let dhid = dhid.flatMap(Self.dhid(in:)), let number = index.byDHID[dhid] {
+            return Station.displayName(for: index.stations[number].name)
+        }
+        if let evaNumber, let number = index.byEVA[evaNumber] { return Station.displayName(for: index.stations[number].name) }
+        if let number = index.byNameKey[dbNameKey(name)], number >= 0 { return Station.displayName(for: index.stations[number].name) }
+        if let boardName, let local = Station.localStop(name, requiringMark: false),
+           boardName == local.town || boardName.hasPrefix(local.town + " ") || boardName.hasPrefix(local.town + "-") {
+            return local.stop
+        }
+        return Station.displayName(for: name)
+    }
+
+    /// A DB station's name as compared with how DB's other data writes it: `folded`, without a level in brackets
+    /// ("(S)", "(S-Bahn)", "(tief)"), "Str"/"Str." and "Bf" written out, only letters and digits.
+    static func dbNameKey(_ name: String) -> String {
+        var text = folded(name)
+        text = text.replacingOccurrences(of: #"\s*\((s|s-bahn|tief|oben|unten)\)"#, with: " ", options: .regularExpression)
+        text = text.replacingOccurrences(of: #"str\.?(?=[^\p{L}]|$)"#, with: "strasse", options: .regularExpression)
+        text = text.replacingOccurrences(of: #"(?<![\p{L}])bf\.?(?=[^\p{L}]|$)"#, with: "bahnhof", options: .regularExpression)
+        text = text.replacingOccurrences(of: "hauptbahnhof", with: "hbf")
+        return text.filter { $0.isLetter || $0.isNumber }
     }
 
     // MARK: Germany

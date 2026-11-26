@@ -256,7 +256,7 @@ public struct TimetablesClient: Sendable {
     /// arrival kept Transitous' forecast, which for S-Bahn lines can be several minutes off DB's own (#76).
     private func scheduledStop(eva: String, category: String, number: String, time: Date,
                                side: KeyPath<TimetablesStop, TimetablesEvent?>) async -> (eva: String, stop: TimetablesStop)? {
-        let known = [eva] + (Self.lowerLevels[eva] ?? [])
+        let known = Self.knownLevels(of: eva)
         for candidate in known {
             if let planned = try? await plan(eva: candidate, around: time),
                let stop = Self.match(planned, category: category, number: number, plannedTime: time, side: side) {
@@ -277,6 +277,16 @@ public struct TimetablesClient: Sendable {
     /// at all and kept Transitous' forecast, which often drops back to "on time" for stops further
     /// ahead (issue #76: S4 running 3 minutes late, its arrival shown on time). Tried before asking
     /// `/station`, so these work without it; any other station's levels come from there.
+    /// `eva` and the levels known without asking: `lowerLevels` and the offline list's (`StationNames.levels(of:)`),
+    /// which has the S-Bahn station of Berlin's big stations (Gesundbrunnen, Südkreuz, Ostkreuz) that `/station` leaves out.
+    static func knownLevels(of eva: String) -> [String] {
+        var levels = [eva]
+        for level in (lowerLevels[eva] ?? []) + StationNames.levels(of: eva) where !levels.contains(level) {
+            levels.append(level)
+        }
+        return levels
+    }
+
     static let lowerLevels: [String: [String]] = [
         "8000261": ["8098263"], // München Hbf (tief)
         "8000096": ["8098096"], // Stuttgart Hbf (tief)
@@ -306,7 +316,7 @@ public struct TimetablesClient: Sendable {
     /// `fchg` (added at short notice) counts too. Without `fchg` the plan alone is shown, without live times.
     func boardStops(at station: Station, kind: BoardKind, from start: Date, to end: Date) async throws -> [BoardStop]? {
         guard let eva = await eva(for: station) else { return nil }
-        var levels = [eva] + (Self.lowerLevels[eva] ?? [])
+        var levels = Self.knownLevels(of: eva)
         for level in await otherLevels(of: eva) where !levels.contains(level) { levels.append(level) }
         var hours: [Date] = []
         var hour = Calendar.current.dateInterval(of: .hour, for: start)?.start ?? start

@@ -373,12 +373,17 @@ in `project.pbxproj`: new files join their target automatically.
 ### Transit
 
 - `Transit/TransitProvider.swift` – `TransitProvider` (`searchStations`, `journeys`, `board`, `trip`), `JourneyQuery`.
-- `Transit/CombinedProvider.swift` – what the app uses: DB first, Transitous only where DB has no data: journeys from `RISRoutingProvider` (`dbJourneys`), boards from `DBBoardProvider` (`dbBoards`), stations from bahn.de's search (`stationsFromDB`, `dbStations(_:near:)`: not for one or two letters, RIL100 codes or a lone "Hbf"; "b"/"t" by bahn.de's products, "l" sorted on the device); `TransitousProvider` (`primary`) answers when DB finds nothing, fails or has no EVA; `RISRoutingProvider` is also the fallback; cooldown
+- `Transit/CombinedProvider.swift` – what the app uses: DB first, Transitous only where DB has no data: journeys from `RISRoutingProvider` (`dbJourneys`), boards from `DBBoardProvider` (`dbBoards`), stations from bahn.de's search (`stationsFromDB`, `dbStations(_:near:)`: not for one or two letters, RIL100 codes or a lone "Hbf"; a station once, without its other levels or the stops bahn.de bundles at it, `mergingStationParts`; "b"/"t" by bahn.de's products, "l" sorted on the device); `TransitousProvider` (`primary`) answers when DB finds nothing, fails or has no EVA; `RISRoutingProvider` is also the fallback; cooldown
   health check, `BahnDeClient`, `VagonwebClient`, `BahnExpertClient`, `BahnJetztClient`.
 - `Transit/DBBoards/DBBoardProvider.swift` – boards from DB: trains from DB Timetables (`TimetablesClient.boardStops`:
-  plan + fchg at every level, trains only in fchg, `ppth`/`cpth` for the other end), buses/trams/subways from
-  RIS::Boards through our server (`RISBoardsClient`, `includeStationGroup`); a stop IRIS doesn't know gets everything
-  from RIS::Boards. Source `.bahnDe`; trip IDs are RIS journey IDs or `IRISTripReference` ("iris|ICE|23|eva|epoch|d"),
+  plan + fchg at every level – `knownLevels`, incl. the offline list's `StationNames.levels(of:)`: Berlin's S-Bahn
+  stations like "Berlin Gesundbrunnen(S)" (8089015), which `/station` doesn't name –, trains only in fchg,
+  `ppth`/`cpth` for the other end), buses/trams/subways from RIS::Boards through our server (`RISBoardsClient`,
+  `includeStationGroup`); a stop IRIS doesn't know gets everything from RIS::Boards. The other end reads like the
+  app's other names (`StationNames.displayName(ofDBStop:)`: DB's station by DHID, EVA or name without its level,
+  "Hermannstr.(S+U), Berlin" → "Berlin Hermannstraße"; a local stop without its lines and the board's own town,
+  "Leopoldplatz (U), Berlin" → "Leopoldplatz"; `Station.displayName(for:)` reads bahn.de's "<stop> (U), <town>"
+  like VBB's names and drops "(S)"/"(S-Bahn)"). Source `.bahnDe`; trip IDs are RIS journey IDs or `IRISTripReference` ("iris|ICE|23|eva|epoch|d"),
   opened by `RISRoutingProvider.trip(id:)` from RIS::Journeys (`RISJourneysClient.trip`), else bahn.de.
 - `Transit/RISRouting/RISRoutingProvider.swift` – journeys from DB's own routing first, as in the DB Navigator
   (RIS::Routing, `verkehrslage.db.info/api/routing/multimodal`, no key, undocumented). Stops by EVA number
