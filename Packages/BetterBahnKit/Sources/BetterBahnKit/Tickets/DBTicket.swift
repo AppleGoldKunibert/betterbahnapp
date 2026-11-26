@@ -112,6 +112,9 @@ public struct DBTicket: Codable, Sendable, Hashable, Identifiable {
     /// Only seat reservations, no ticket (e.g. booked with a BahnCard 100). Optional so tickets saved
     /// before this existed still load.
     public var reservationOnly: Bool?
+    /// The Komfort-Check-in on the booked connection's trains (#605); nil where bahn.de offers none
+    /// or for tickets saved before.
+    public var komfortCheckin: KomfortCheckin?
 
     /// Only seat reservations: the ticket to travel with is separate.
     public var isReservationOnly: Bool { reservationOnly ?? false }

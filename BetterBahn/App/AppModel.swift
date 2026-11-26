@@ -829,12 +829,12 @@ final class AppModel {
 
     /// Fetches the position of each train leg of an unfinished saved journey that is underway
     /// (plus 10 minutes either side, since departures and arrivals shift). All legs share one
-    /// bahn.jetzt request, and nothing is requested while no train is running.
+    /// position list (our Worker's, else bahn.jetzt's), and nothing is requested while no train is running.
     func refreshTrainPositions() async {
-        guard let bahnJetzt = provider.bahnJetzt else { return }
+        guard let positionSource = provider.trainPositions else { return }
         let now = Date.now
         let legs = upcomingJourneys.flatMap(\.journey.transitLegs).filter { leg in
-            BahnJetztClient.supports(leg.line) && !leg.cancelled
+            TrainPositionClient.supports(leg.line) && !leg.cancelled
                 && leg.departure.best.addingTimeInterval(-600) <= now && now <= leg.arrival.best.addingTimeInterval(600)
         }
         guard !legs.isEmpty else {
@@ -845,7 +845,7 @@ final class AppModel {
         await withTaskGroup(of: LiveTrainPosition?.self) { group in
             for leg in legs {
                 group.addTask {
-                    guard let name = leg.line?.name, let position = try? await bahnJetzt.position(for: leg) else { return nil }
+                    guard let name = leg.line?.name, let position = try? await positionSource.position(for: leg) else { return nil }
                     return LiveTrainPosition(trainName: name, position: position)
                 }
             }
@@ -853,7 +853,7 @@ final class AppModel {
                 if let live { found[live.trainName] = live }
             }
         }
-        // A failed refresh (offline, bahn.jetzt pausing) keeps the last positions; they turn stale on the map.
+        // A failed refresh (offline, the sources pausing) keeps the last positions; they turn stale on the map.
         for (name, live) in trainPositions where found[name] == nil && legs.contains(where: { $0.line?.name == name }) {
             found[name] = live
         }
@@ -887,17 +887,17 @@ final class AppModel {
         }
     }
 
-    /// Where one train is right now, from bahn.jetzt; nil while it isn't running (or not in its list).
+    /// Where one train is right now (our Worker with RIS::Maps, else bahn.jetzt); nil while it isn't running.
     func livePosition(of route: LiveTrainRoute) async throws -> TrainPosition? {
-        guard let bahnJetzt = provider.bahnJetzt else { return nil }
-        return try await bahnJetzt.position(of: route.line, plannedDeparture: route.plannedDeparture, route: route.hint)
+        guard let positionSource = provider.trainPositions else { return nil }
+        return try await positionSource.position(of: route.line, plannedDeparture: route.plannedDeparture, route: route.hint)
     }
 
     /// Keeps reporting the positions of a journey's running trains for as long as the calling task
-    /// runs (the journey map). All legs share one bahn.jetzt list, and nothing is fetched while none
+    /// runs (the journey map). All legs share one position list, and nothing is fetched while none
     /// of them may be running.
     func followPositions(of legs: [Leg], update: ([LiveTrainPosition]) -> Void) async {
-        let legs = legs.filter { !$0.isWalking && !$0.cancelled && BahnJetztClient.supports($0.line) }
+        let legs = legs.filter { !$0.isWalking && !$0.cancelled && TrainPositionClient.supports($0.line) }
         guard !legs.isEmpty else { return }
         await repeatingAtPositionInterval {
             let running = legs.map(LiveTrainRoute.init(leg:)).filter { $0.mayBeRunning() }
@@ -926,18 +926,24 @@ final class AppModel {
     /// Transitous' map answers can be megabytes, so they get more time than other requests.
     @ObservationIgnored private let liveTrainSource = TransitousProvider(http: HTTPClient(timeout: 30))
 
-    /// Every train bahn.jetzt has a position for (the list `livePosition(of:)` uses too); nil when it
+    /// Every train with a live position (the list `livePosition(of:)` uses too); nil when it
     /// can't be reached or is pausing.
     func runningTrains() async -> [BahnJetztClient.RunningTrain]? {
-        guard let bahnJetzt = provider.bahnJetzt else { return nil }
-        return try? await bahnJetzt.runningTrains()
+        guard let positionSource = provider.trainPositions else { return nil }
+        return try? await positionSource.runningTrains()
     }
 
-    /// Transitous' trains in `area` for the next `LiveTrainCoverage.window`, with their tracks; nil on failure.
+    /// Transitous' trains in `area` from `LiveTrainCoverage.lookback` ago for the next `LiveTrainCoverage.window`,
+    /// with their tracks; nil on failure.
     func liveTrainSegments(in area: MapArea, zoom: Int) async -> [LiveTrainSegment]? {
         let now = Date.now
-        return try? await liveTrainSource.liveTrainSegments(in: area, zoom: zoom, from: now,
+        return try? await liveTrainSource.liveTrainSegments(in: area, zoom: zoom, from: now.addingTimeInterval(-LiveTrainCoverage.lookback),
                                                             to: now.addingTimeInterval(LiveTrainCoverage.window))
+    }
+
+    /// Every stretch of `segment`'s trip, for a train running later than the loaded stretches reach; nil on failure.
+    func liveTrainSegments(completing segment: LiveTrainSegment) async -> [LiveTrainSegment]? {
+        try? await liveTrainSource.liveTrainSegments(completing: segment)
     }
 
     /// Series, Triebzug numbers and names of a train from bahn.de's coach sequence. bahn.de caches
@@ -1035,6 +1041,31 @@ final class AppModel {
             }
         }
         if changed { savedJourneys = updated }
+    }
+
+    /// What the server's Tz log said about a train's neighbours and when it was asked; per train and day.
+    @ObservationIgnored private var turnaroundCache: [String: (asked: Date, value: TzTurnaround?)] = [:]
+    /// When asking for a train last failed; it isn't asked again for 5 minutes, however often the view reappears.
+    @ObservationIgnored private var turnaroundFailures: [String: Date] = [:]
+
+    /// The trains a train's trainset ran as before and runs as after it, from our server's Tz log (#501, #502). Asked
+    /// at most every 30 minutes per train and day, which is also how often the server looks at its source, and only
+    /// within a day and a half of the ride (the log knows no more); an empty answer counts as answered too.
+    func turnaround(for line: Line?, on date: Date) async -> TzTurnaround? {
+        guard abs(date.timeIntervalSinceNow) < 36 * 3600, let ref = BahnDeClient.trainReference(for: line) else { return nil }
+        let key = "\(ref.category) \(ref.number)|\(BahnDeClient.berlinDay(date))"
+        if let cached = turnaroundCache[key], cached.asked.timeIntervalSinceNow > -30 * 60 { return cached.value }
+        if let failed = turnaroundFailures[key], failed.timeIntervalSinceNow > -5 * 60 { return turnaroundCache[key]?.value }
+        let found = try? await TzLogClient().turnaround(for: line, on: date)
+        let value = found.flatMap { $0.isEmpty ? nil : $0 }
+        // An answer, even an empty one, waits out the half hour; a failed request is asked again after 5 minutes.
+        if found != nil {
+            turnaroundCache[key] = (.now, value)
+            turnaroundFailures[key] = nil
+        } else {
+            turnaroundFailures[key] = .now
+        }
+        return value ?? turnaroundCache[key]?.value
     }
 
     @ObservationIgnored private var trainTypeCache: [String: TrainTypeLookup?] = [:]
@@ -1923,7 +1954,8 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(trainPositionRefresh.rawValue, forKey: "trainPositionRefresh") }
     }
 
-    /// Whether maps show the other running trains around too (#505). Stays on this device.
+    /// Whether maps show the other running trains around too (#505); off until switched on with a map's
+    /// "Andere Züge" button (or in the settings), then every map starts that way. Stays on this device.
     var showOtherTrains: Bool {
         didSet { UserDefaults.standard.set(showOtherTrains, forKey: "showOtherTrains") }
     }
@@ -2046,7 +2078,7 @@ final class AppSettings {
         liveActivitiesEnabled = defaults.object(forKey: "liveActivitiesEnabled") as? Bool ?? true
         liveActivityServerUpdates = defaults.object(forKey: "liveActivityServerUpdates") as? Bool ?? true
         trainPositionRefresh = defaults.string(forKey: "trainPositionRefresh").flatMap(TrainPositionRefresh.init) ?? .automatic
-        showOtherTrains = defaults.object(forKey: "showOtherTrains") as? Bool ?? true
+        showOtherTrains = defaults.object(forKey: "showOtherTrains") as? Bool ?? false
         otherTrainsOnMobileData = defaults.bool(forKey: "otherTrainsOnMobileData")
         stationFlagMode = defaults.string(forKey: "stationFlagMode").flatMap(StationFlagMode.init) ?? .foreignOnly
         // A new key: switching off sharing (#169) said nothing about wanting to see the statistics.

@@ -3,7 +3,8 @@ import Foundation
 /// Transitous is primary. A separately configured provider can supply failover.
 /// bahn.de remains a station-search fallback and the source for coach sequences and journey details;
 /// when bahn.de has no coach sequence (yet), vagonweb.cz supplies the train type and planned Wagenreihung, with bahn.expert as the
-/// fallback for the train type; bahn.jetzt supplies live train positions.
+/// fallback for the train type; live train positions come from DB's RIS::Maps through our Worker, else bahn.jetzt
+/// (`TrainPositionClient`).
 public final class CombinedProvider: TransitProvider {
     public var source: DataSource { primary.source }
     public let primary: any TransitProvider
@@ -11,7 +12,7 @@ public final class CombinedProvider: TransitProvider {
     public let bahnDe: BahnDeClient?
     public let bahnExpert: BahnExpertClient?
     public let vagonweb: VagonwebClient?
-    public let bahnJetzt: BahnJetztClient?
+    public let trainPositions: TrainPositionClient?
     /// Asked first for journeys: DB's own routing, as in the DB Navigator. Transitous answers when it finds
     /// none (often abroad), fails, or a stop has no EVA number for it (`RISRoutingProvider.eva(for:)`).
     public let dbJourneys: RISRoutingProvider?
@@ -30,7 +31,7 @@ public final class CombinedProvider: TransitProvider {
                 bahnDe: BahnDeClient? = BahnDeClient(),
                 bahnExpert: BahnExpertClient? = BahnExpertClient(),
                 vagonweb: VagonwebClient? = VagonwebClient(),
-                bahnJetzt: BahnJetztClient? = BahnJetztClient(),
+                trainPositions: TrainPositionClient? = TrainPositionClient(),
                 dbJourneys: RISRoutingProvider? = nil,
                 dbBoards: DBBoardProvider? = nil,
                 stationsFromDB: Bool = false,
@@ -42,7 +43,7 @@ public final class CombinedProvider: TransitProvider {
         self.bahnDe = bahnDe
         self.bahnExpert = bahnExpert
         self.vagonweb = vagonweb
-        self.bahnJetzt = bahnJetzt
+        self.trainPositions = trainPositions
         self.primary = primary
         self.fallback = fallback
         self.health = Health(cooldown: cooldown)

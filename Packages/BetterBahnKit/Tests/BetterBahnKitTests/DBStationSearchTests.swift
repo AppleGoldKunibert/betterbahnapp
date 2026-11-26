@@ -22,7 +22,7 @@ import Testing
         let session = URLSession(configuration: config)
         let http = HTTPClient(session: session)
         return (CombinedProvider(primary: TransitousProvider(http: http), bahnDe: BahnDeClient(http: http, gate: BahnDeGate()),
-                                 bahnExpert: nil, vagonweb: nil, bahnJetzt: nil, stationsFromDB: true), session)
+                                 bahnExpert: nil, vagonweb: nil, trainPositions: nil, stationsFromDB: true), session)
     }
 
     var askedTransitous: Bool { StationSearchProtocol.requests.withLock { $0 }.contains { $0.contains("transitous") } }

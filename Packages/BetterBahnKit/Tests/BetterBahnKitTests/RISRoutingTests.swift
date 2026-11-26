@@ -154,7 +154,7 @@ import Testing
         let http = HTTPClient(session: session)
         let ris = RISRoutingProvider(http: http, bahnDe: BahnDeClient(http: http, gate: BahnDeGate()))
         let combined = CombinedProvider(primary: TransitousProvider(http: http), fallback: ris,
-                                        bahnDe: nil, bahnExpert: nil, vagonweb: nil, bahnJetzt: nil)
+                                        bahnDe: nil, bahnExpert: nil, vagonweb: nil, trainPositions: nil)
 
         let page = try await combined.journeys(JourneyQuery(from: berlin, to: munich, date: try date("2026-11-04T07:00:00Z")))
         #expect(page.source == .bahnDe)
@@ -180,7 +180,7 @@ import Testing
         let http = HTTPClient(session: session)
         let ris = RISRoutingProvider(http: http, bahnDe: BahnDeClient(http: http, gate: BahnDeGate()))
         return (CombinedProvider(primary: TransitousProvider(http: http), fallback: ris, bahnDe: nil, bahnExpert: nil,
-                                 vagonweb: nil, bahnJetzt: nil, dbJourneys: ris), session)
+                                 vagonweb: nil, trainPositions: nil, dbJourneys: ris), session)
     }
 
     /// DB is asked first; Transitous isn't asked when DB has journeys.

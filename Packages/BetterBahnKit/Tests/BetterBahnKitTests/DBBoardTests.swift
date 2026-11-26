@@ -103,7 +103,7 @@ import Testing
         defer { session.invalidateAndCancel() }
         let http = HTTPClient(session: session)
         let combined = CombinedProvider(primary: TransitousProvider(http: http), bahnDe: nil, bahnExpert: nil, vagonweb: nil,
-                                        bahnJetzt: nil, dbBoards: db)
+                                        trainPositions: nil, dbBoards: db)
         let entries = try await combined.board(.departures, at: koeln, date: noon, duration: 60, products: Set(Product.allCases))
         #expect(entries.first?.source == .bahnDe)
         #expect(DBBoardProtocol.requests.withLock { $0 }.allSatisfy { !$0.contains("transitous") })
@@ -111,7 +111,7 @@ import Testing
         let (empty, emptySession) = provider(irisKnowsStation: false, risAnswers: false)
         defer { emptySession.invalidateAndCancel() }
         let fallback = CombinedProvider(primary: TransitousProvider(http: HTTPClient(session: emptySession)), bahnDe: nil, bahnExpert: nil,
-                                        vagonweb: nil, bahnJetzt: nil, dbBoards: empty)
+                                        vagonweb: nil, trainPositions: nil, dbBoards: empty)
         _ = try? await fallback.board(.departures, at: koeln, date: noon, duration: 60, products: Set(Product.allCases))
         #expect(DBBoardProtocol.requests.withLock { $0 }.contains { $0.contains("transitous") })
     }
@@ -154,7 +154,7 @@ import Testing
         let (db, session) = provider(risAnswers: false)
         defer { session.invalidateAndCancel() }
         let combined = CombinedProvider(primary: BusOnlyProvider(station: koeln, at: noon.addingTimeInterval(600)), bahnDe: nil,
-                                        bahnExpert: nil, vagonweb: nil, bahnJetzt: nil, dbBoards: db)
+                                        bahnExpert: nil, vagonweb: nil, trainPositions: nil, dbBoards: db)
         let entries = try await combined.board(.departures, at: koeln, date: noon, duration: 60, products: Set(Product.allCases))
         #expect(entries.contains { $0.line.name == "ICE 22" && $0.source == .bahnDe })
         #expect(entries.contains { $0.line.name == "Bus 133" && $0.source == .transitous })

@@ -1,3 +1,5 @@
+import { decodeJourney, journeyPageHTML } from "./journeypage.mjs";
+import { liveJourney } from "./journeylive.mjs";
 import { TOKEN_HEADER, unauthorized, verifyToken } from "./shared/appattest.mjs";
 import { arrivalPageHTML, arrivalView, expiryOf, extendedExpiry, parseArrival } from "./arrival.mjs";
 
@@ -61,7 +63,7 @@ ${PAGE_STYLE}
 <body>
 <main>
 <h1>Datenschutz</h1>
-<p class="muted">BetterBahn für iPhone · Stand: 19. Oktober 2026</p>
+<p class="muted">BetterBahn für iPhone · Stand: 19. November 2026</p>
 
 <p>BetterBahn ist ein privates Projekt und steht in keiner Verbindung zur Deutschen Bahn AG. Die App hat
 keine Benutzerkonten, keine Werbung, kein Tracking und keine Analyse-Werkzeuge. Was du in der App speicherst,
@@ -92,11 +94,11 @@ aber nicht mit Daten über dich:</p>
 dafür geht der gezeigte Kartenausschnitt an den Dienst, nie dein Standort)</li>
 <li><a href="https://www.bahnhof.de">bahnhof.de</a> der Deutschen Bahn (Verbindungen; es gelten die
 <a href="https://www.bahn.de/datenschutz">Datenschutzhinweise der Deutschen Bahn</a>)</li>
-<li><a href="https://www.vagonweb.cz">vagonweb.cz</a> (geplante Wagenreihungen und Zugtypen), <a href="https://bahn.expert">bahn.expert</a> (Zugtypen) und <a href="https://bahn.jetzt">bahn.jetzt</a> (Zugpositionen auf der Karte)</li>
+<li><a href="https://www.vagonweb.cz">vagonweb.cz</a> (geplante Wagenreihungen und Zugtypen), <a href="https://bahn.expert">bahn.expert</a> (Zugtypen) und <a href="https://bahn.jetzt">bahn.jetzt</a> (Zugpositionen, wenn unser Server keine hat)</li>
 <li><a href="https://www.openrailwaymap.org">OpenRailwayMap</a> (Kartenkacheln mit Daten von <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>) und Apple Karten</li>
 <li><a href="https://open-meteo.com">Open-Meteo</a> (Wetter bei Ankunft und beim Umstieg; abschaltbar in den Einstellungen) –
 dafür geht nur die ungefähre Lage des Bahnhofs an den Dienst, nie dein Standort</li>
-<li>bahn.de und die Timetables-, RIS::Journeys-, RIS::Boards- und FaSta-Schnittstellen der Deutschen Bahn (Bahnhofssuche, Abfahrtstafeln, Zugsuche nach Nummer, Zugverläufe, Echtzeiten, Aufzüge außer Betrieb) – diese Anfragen laufen über den Server von
+<li>bahn.de und die Timetables-, RIS::Journeys-, RIS::Boards-, RIS::Maps- und FaSta-Schnittstellen der Deutschen Bahn (Bahnhofssuche, Abfahrtstafeln, Zugsuche nach Nummer, Zugverläufe, Echtzeiten, Zugpositionen, Aufzüge außer Betrieb) – diese Anfragen laufen über den Server von
 BetterBahn (siehe unten), daher sieht die Deutsche Bahn nicht deine IP-Adresse, sondern die des Servers. Es gelten die
 <a href="https://www.bahn.de/datenschutz">Datenschutzhinweise der Deutschen Bahn</a>.</li>
 </ul>
@@ -108,6 +110,8 @@ BetterBahn (siehe unten), daher sieht die Deutsche Bahn nicht deine IP-Adresse, 
 kurz zwischen (Sekunden bis höchstens einen Tag), damit nicht jede Anfrage erneut gestellt wird,</li>
 <li>laden die Liste aller Aufzüge, die an Bahnhöfen außer Betrieb sind, und speichern sie 5 Minuten zwischen. Die App
 lädt immer die ganze Liste, der Server erfährt also nicht, welchen Bahnhof du ansiehst,</li>
+<li>laden die Positionen aller fahrenden Züge der Deutschen Bahn und speichern sie 15 Sekunden zwischen. Die App lädt
+immer die ganze Liste, der Server erfährt also nicht, welchen Zug du ansiehst,</li>
 <li>signieren Apple-Wallet-Pässe: Wenn du „Zu Apple Wallet hinzufügen“ tippst, werden die Daten des Passes
 (Barcode des Tickets, Namen der Reisenden, Verbindung, Sitzplätze, Auftragsnummer; bei Zeitkarten auch das
 Geburtsdatum aus dem Barcode) an den Server geschickt, dort signiert und sofort zurückgegeben,</li>
@@ -133,7 +137,9 @@ Der Server erhält dabei eine zufällige Schlüsselkennung dieser App-Installati
 <p>Wenn du eine Reise teilst, schickt die App die Verbindung (Bahnhöfe, Züge, Zeiten, Gleise) an den Server
 von BetterBahn. Dort wird sie unter einer zufälligen Kennung 30 Tage lang gespeichert und danach automatisch
 gelöscht. Geteilt wird nur ein kurzer Link; wer ihn hat, kann die Reise in dieser Zeit abrufen. Namen, Tickets
-oder andere Angaben über dich sind nicht dabei. Ist der Server nicht erreichbar, teilt die App stattdessen einen
+oder andere Angaben über dich sind nicht dabei. Wer den Link ohne die App öffnet, sieht die Reise auf einer
+Webseite, die solange sie offen ist jede Minute die aktuellen Zeiten nachlädt; dafür liest der Server die Reise
+beim Abruf aus und fragt bei der Deutschen Bahn nach den Zügen. Ist der Server nicht erreichbar, teilt die App stattdessen einen
 längeren Link, der die Reise selbst enthält; dann wird nichts gespeichert.</p>
 <p>Mit „Ankunft teilen“ schickt die App zusätzlich den letzten Zug der Reise mit seinen Halten, Zeiten und Gleisen.
 Wer den Link öffnet, sieht auch ohne App eine Seite mit Ankunftszeit und Gleis; die aktuellen Zeiten fragt der
@@ -172,7 +178,7 @@ löscht er sie und beendet sie bei Träwelling. Hat 180 Tage lang keines deiner 
 ebenfalls.</p>
 <p>Die App zeigt dir, wer von den Leuten, denen du auf Träwelling folgst, gerade eingecheckt ist. Um deren Zug
 anzuzeigen, fragt sie Transitous nach den Abfahrten am Einstiegsbahnhof des Check-ins, mit Bahnhof und Uhrzeit,
-aber ohne Namen; die Live-Position kommt wie bei deinen eigenen Zügen von bahn.jetzt.</p>
+aber ohne Namen; die Live-Position kommt wie bei deinen eigenen Zügen von unserem Server oder bahn.jetzt.</p>
 <p>Für die Emojis im Check-in-Text lädt die App die Emoji-Liste und -Bilder der Mastodon-Instanz, die mit
 deinem Träwelling-Konto verbunden ist, sonst von <a href="https://zug.network">zug.network</a>. Dabei wird
 nichts über dich gesendet außer deiner IP-Adresse, die jeder Abruf im Internet mitschickt.</p>
@@ -305,11 +311,13 @@ export function handleTraewellingCallback(request) {
 
 // A journey shared from the app is stored here for a while, so the app can share a short HTTPS link
 // instead of a `betterbahn://share?data=…` link several KB long. The payload is exactly that link's
-// `data` (zlib JSON, base64url); the app decodes and checks it as before, the Worker never looks inside.
+// `data` (deflate JSON, base64url); the app decodes and checks it as before. The Worker only looks inside to
+// draw the journey on `/s/<id>` for people without the app (`journeypage.mjs`), nothing more.
 //
 // POST /share { data }  → 201 { id, url, expiresAt }   (App Attest token, rate limited per app install)
 // GET  /share/<id>      → { data }                     (what the app fetches for a link)
-// GET  /s/<id>          → fallback page: with the app installed, iOS opens the app instead (Universal Link)
+// GET  /s/<id>          → the journey as a web page (with the app installed, iOS opens the app instead:
+//                         Universal Link); a link whose data can't be drawn gets a plain "open in the app" page
 //
 // "Ankunft teilen" (#317, see arrival.mjs): `POST /share { data, arrival }` also stores the last train, only
 // until 2 hours after its arrival; `/s/<id>` then shows the arrival page, which refreshes from
@@ -353,7 +361,7 @@ export async function handleShare(request, env = {}, now = Date.now(), deps = {}
     if (url.pathname === SHARE_API_PATH) return createShare(request, env, url, now);
     if (url.pathname.startsWith(`${SHARE_API_PATH}/`)) {
         const rest = url.pathname.slice(SHARE_API_PATH.length + 1);
-        if (rest.endsWith("/live")) return readArrival(request, env, rest.slice(0, -"/live".length), now, deps);
+        if (rest.endsWith("/live")) return readLive(request, env, rest.slice(0, -"/live".length), now, deps);
         return readShare(request, env, rest, now);
     }
     if (url.pathname.startsWith(SHARE_PAGE_PREFIX)) {
@@ -437,15 +445,36 @@ async function storedEntry(request, env, id) {
     return { entry: parseEntry(await env.SHARES.get(id)) };
 }
 
-/// The arrival page's data. A train that is late keeps its link until 2 hours after its new arrival.
-async function readArrival(request, env, id, now, deps) {
+/// The data the open page refreshes from: the arrival page's for an arrival link (a train that is late keeps its
+/// link until 2 hours after its new arrival), else the journey with DB's live times.
+async function readLive(request, env, id, now, deps) {
     if (request.method !== "GET") return shareJSON(405, { error: "method_not_allowed" }, { Allow: "GET" });
     if (!env.SHARES) return shareJSON(503, { error: "not_configured" });
     const { entry, limited } = await storedEntry(request, env, id);
     if (limited) return shareJSON(429, { error: "rate_limited" });
-    if (!entry?.arrival || entry.expiresAt <= now) return shareJSON(404, { error: "not_found" });
-    const view = await currentArrival(env, id, entry, now, deps);
-    return shareJSON(200, view);
+    if (!entry || entry.expiresAt <= now) return shareJSON(404, { error: "not_found" });
+    if (entry.arrival) return shareJSON(200, await currentArrival(env, id, entry, now, deps));
+    const journey = await decodeJourney(entry.data);
+    if (!journey) return shareJSON(404, { error: "not_found" });
+    return shareJSON(200, await currentJourney(env, id, journey, now, deps));
+}
+
+/// How long a link's live answer is reused: everybody reading one link within a minute gets the same one, so
+/// upstream is asked once a minute per link at most, and only while somebody reads it.
+const LIVE_REUSE = 55;
+
+async function currentJourney(env, id, journey, now, deps) {
+    const key = new Request(`https://live.invalid/share/${id}`);
+    const cached = deps.cache ? await deps.cache.match(key) : null;
+    if (cached) return cached.json();
+    const view = await liveJourney(journey, now,
+        { proxyURL: env.BAHNDE_PROXY_URL, secret: env.TOKEN_SECRET, ...deps });
+    if (deps.cache) {
+        const store = deps.cache.put(key, new Response(JSON.stringify(view),
+            { headers: { "Cache-Control": `public, max-age=${LIVE_REUSE}` } }));
+        deps.waitUntil ? deps.waitUntil(store) : await store;
+    }
+    return view;
 }
 
 async function currentArrival(env, id, entry, now, deps) {
@@ -495,6 +524,20 @@ async function sharePage(request, env, id, now, deps) {
         });
     }
     const exists = entry !== null && !isExpiredArrival(entry, now);
+    // Without the app the link shows the whole journey, drawn from the stored payload.
+    const journey = exists && request.method === "GET" ? await decodeJourney(entry.data) : null;
+    if (journey) {
+        // The page asks `/share/<id>/live` for DB's current times, so it needs its one script.
+        const nonce = randomID();
+        const html = journeyPageHTML(id, journey, { style: PAGE_STYLE, footer: SHARE_FOOTER, appStoreURL: env.APP_STORE_URL, nonce });
+        return new Response(html, {
+            status: 200,
+            headers: {
+                ...headers,
+                "Content-Security-Policy": `default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'; connect-src 'self'`,
+            },
+        });
+    }
     const html = sharePageHTML(exists ? id : null, env.APP_STORE_URL);
     return new Response(request.method === "HEAD" ? null : html, { status: exists ? 200 : 404, headers });
 }
