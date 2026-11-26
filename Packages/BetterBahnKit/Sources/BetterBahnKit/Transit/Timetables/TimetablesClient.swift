@@ -272,11 +272,6 @@ public struct TimetablesClient: Sendable {
         return nil
     }
 
-    /// Big stations whose S-Bahn platforms Timetables lists as a station of their own, which station
-    /// search (and so `eva(for:)`) never returns. Without them an S-Bahn ending there got no DB delay
-    /// at all and kept Transitous' forecast, which often drops back to "on time" for stops further
-    /// ahead (issue #76: S4 running 3 minutes late, its arrival shown on time). Tried before asking
-    /// `/station`, so these work without it; any other station's levels come from there.
     /// `eva` and the levels known without asking: `lowerLevels` and the offline list's (`StationNames.levels(of:)`),
     /// which has the S-Bahn station of Berlin's big stations (Gesundbrunnen, Südkreuz, Ostkreuz) that `/station` leaves out.
     static func knownLevels(of eva: String) -> [String] {
@@ -287,6 +282,11 @@ public struct TimetablesClient: Sendable {
         return levels
     }
 
+    /// Big stations whose S-Bahn platforms Timetables lists as a station of their own, which station
+    /// search (and so `eva(for:)`) never returns. Without them an S-Bahn ending there got no DB delay
+    /// at all and kept Transitous' forecast, which often drops back to "on time" for stops further
+    /// ahead (issue #76: S4 running 3 minutes late, its arrival shown on time). Tried before asking
+    /// `/station`, so these work without it; any other station's levels come from there.
     static let lowerLevels: [String: [String]] = [
         "8000261": ["8098263"], // München Hbf (tief)
         "8000096": ["8098096"], // Stuttgart Hbf (tief)
