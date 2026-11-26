@@ -112,6 +112,7 @@ import Testing
         #expect(YearReview.countryCode(of: stop("Bruxelles", id: "be-sncb_8814001", 0, 0)) == "BE")
         #expect(YearReview.countryCode(of: stop("Praha", id: "cz-CZPTT_czptt:stop:CZ:54212", 0, 0)) == "CZ")
         #expect(YearReview.countryCode(of: stop("Děčín", id: "at-Railway-Current-Reference-Data-2026_cz:0:5433295:0:7", 0, 0)) == "CZ")
+        #expect(YearReview.countryCode(of: stop("Berlin Südkreuz", id: "at-Railway-Current-Reference-Data-2026_Pde:11000:900058101", 0, 0)) == "DE")
         #expect(YearReview.countryCode(of: stop("Irgendwo", id: "12345", 0, 0)) == nil)
     }
 

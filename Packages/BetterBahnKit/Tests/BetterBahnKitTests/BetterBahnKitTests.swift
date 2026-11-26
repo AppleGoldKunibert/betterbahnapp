@@ -2476,6 +2476,7 @@ private final class TwinTrainProtocol: URLProtocol, @unchecked Sendable {
         #expect(StationNames.dhid(in: "de-DELFI_de:14612:16") == "de:14612:16")
         #expect(StationNames.dhid(in: "de-DELFI_de:14628:3620:5:Gleis3") == "de:14628:3620")
         #expect(StationNames.dhid(in: "at-Railway-Current-Reference-Data-2026_de:11000:900003200:1:51") == "de:11000:900003200")
+        #expect(StationNames.dhid(in: "at-Railway-Current-Reference-Data-2026_Pde:11000:900058101") == "de:11000:900058101")
         #expect(StationNames.dhid(in: "de-DELFI_de:08135:0620") == "de:08135:620")
         #expect(StationNames.dhid(in: "de-DELFI_de:05116:23007_G") == "de:05116:23007")
         #expect(StationNames.dhid(in: "de-DELFI_000005400003") == nil)
@@ -2965,6 +2966,24 @@ private final class Ril100GeocodeProtocol: URLProtocol, @unchecked Sendable {
         #expect(!TicketFilter.deutschlandticket.isValid(abroad))
         #expect(!TicketFilter.bahnCard100(.default).isValid(abroad))
         #expect(TicketFilter.deutschlandticket.isValid(entry(regio)))
+    }
+
+    /// ÖBB's reference data in Transitous marks a parent station with a "P" ("Pde:" for Berlin Südkreuz): its
+    /// departures stay in Germany, not in the feed's Austria, so the ticket filters keep them.
+    @Test func parentStationOfAustrianFeedIsGerman() {
+        let suedkreuz = Station(id: "at-Railway-Current-Reference-Data-2026_Pde:11000:900058101", name: "Berlin Südkreuz",
+                                coordinate: nil, evaNumber: nil, source: .transitous)
+        var row = entry(Line(name: "S41", number: nil, product: .suburban, operatorName: "S-Bahn Berlin GmbH"))
+        row.station = suedkreuz
+        #expect(suedkreuz.countryCode == "DE")
+        #expect(TicketFilter.bahnCard100(.default).isValid(row))
+        #expect(TicketFilter.deutschlandticket.isValid(row))
+        // Its parent stations abroad still are: Salzburg Hbf.
+        let salzburg = Station(id: "at-Railway-Current-Reference-Data-2026_Pat:45:50002", name: "Salzburg Hbf",
+                               coordinate: nil, evaNumber: nil, source: .transitous)
+        #expect(salzburg.countryCode == "AT")
+        #expect(Station.feedStopID("at-Railway-Current-Reference-Data-2026_Pde:09162:5") == "de:09162:5")
+        #expect(Station.feedStopID("de-DELFI_de:11000:900003201") == "de:11000:900003201")
     }
 
     func entry(_ line: Line, kind: BoardKind = .departures, otherEnd: String = "Berlin Hbf", terminal: Bool? = false) -> BoardEntry {

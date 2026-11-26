@@ -200,7 +200,7 @@ public struct YearReview: Sendable, Hashable {
         if let code = TrainSearchCountry.code(eva: station.evaNumber) { return code }
         let id = station.id
         guard let underscore = id.firstIndex(of: "_") else { return TrainSearchCountry.code(eva: id) }
-        let local = String(id[id.index(after: underscore)...])
+        let local = String(Station.feedStopID(id))
         if let code = TrainSearchCountry.code(eva: local, ifopt: local.contains(":") ? local : nil) { return code }
         let feed = id[..<underscore].prefix { $0 != "-" }
         return feed.count == 2 && feed.allSatisfy(\.isLetter) ? feed.uppercased() : nil
