@@ -75,6 +75,12 @@ struct JourneyResultsView: View {
         return ticketJourneys.isEmpty ? results : ticketJourneys
     }
 
+    /// The vehicle types the search asks for: with the ticket filter on only the ones the ticket covers, so
+    /// the provider doesn't fill its page with trains the filter then hides.
+    private var searchProducts: Set<Product> {
+        search.onlyValidTicket ? model.ticketFilter.narrowing(search.products) : search.products
+    }
+
     /// With the ticket filter on, the connections the ticket covers; all of them without it.
     private var ticketJourneys: [Journey] {
         search.onlyValidTicket ? results.filter(model.ticketFilter.isValid) : results
@@ -663,12 +669,12 @@ struct JourneyResultsView: View {
             if search.via.isEmpty {
                 let loaded = try await model.provider.journeys(JourneyQuery(
                     from: search.from, to: destination, date: searchDate, isArrival: search.isArrival, cursor: cursor,
-                    products: search.products, maxTransfers: search.maxTransfers))
+                    products: searchProducts, maxTransfers: search.maxTransfers))
                 result = loaded.journeys
                 loadedPage = loaded
             } else {
                 // Routed via search has no cursor-based paging – it's a single chained search.
-                var planner = ViaRoutePlanner(provider: model.provider, products: search.products)
+                var planner = ViaRoutePlanner(provider: model.provider, products: searchProducts)
                 if model.settings.ignoreBoardingRulesEnabled {
                     // Each part of the route may also use trains you may not board or leave at its ends.
                     let picker = model.trainPicker

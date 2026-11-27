@@ -1,0 +1,260 @@
+{
+ "events": [
+  {
+   "arrivalOrDepartureID": "8002548_D_1",
+   "platform": "4",
+   "platformIfopt": "",
+   "platformSchedule": "4",
+   "platformScheduleIfopt": "",
+   "stopPlace": {
+    "evaNumber": "8002548",
+    "ifopt": "de:02000:8002548",
+    "name": "Hamburg Dammtor"
+   },
+   "time": "2026-11-03T12:21:45+01:00",
+   "timeSchedule": "2026-11-03T12:21:00+01:00",
+   "timeType": "REAL",
+   "transport": {
+    "category": "ICE",
+    "journeyNumber": 7,
+    "type": "HIGH_SPEED_TRAIN",
+    "journeyDescription": "ICE 7",
+    "administration": {
+     "administrationID": "80",
+     "operatorCode": "---",
+     "operatorName": "DB"
+    }
+   },
+   "type": "DEPARTURE",
+   "vehicleSequenceAvailable": true
+  },
+  {
+   "arrivalOrDepartureID": "8002549_A_1",
+   "noPassengerChange": true,
+   "platform": "14",
+   "platformIfopt": "",
+   "platformSchedule": "14",
+   "platformScheduleIfopt": "",
+   "stopPlace": {
+    "evaNumber": "8002549",
+    "ifopt": "de:02000:10950",
+    "name": "Hamburg Hbf"
+   },
+   "time": "2026-11-03T12:26:15+01:00",
+   "timeSchedule": "2026-11-03T12:25:00+01:00",
+   "timeType": "REAL",
+   "transport": {
+    "category": "ICE",
+    "journeyNumber": 7,
+    "type": "HIGH_SPEED_TRAIN",
+    "journeyDescription": "ICE 7",
+    "administration": {
+     "administrationID": "80",
+     "operatorCode": "---",
+     "operatorName": "DB"
+    }
+   },
+   "type": "ARRIVAL"
+  },
+  {
+   "arrivalOrDepartureID": "8002549_D_1",
+   "platform": "14",
+   "platformIfopt": "",
+   "platformSchedule": "14",
+   "platformScheduleIfopt": "",
+   "stopPlace": {
+    "evaNumber": "8002549",
+    "ifopt": "de:02000:10950",
+    "name": "Hamburg Hbf"
+   },
+   "time": "2026-11-03T12:30:47+01:00",
+   "timeSchedule": "2026-11-03T12:29:00+01:00",
+   "timeType": "REAL",
+   "transport": {
+    "category": "ICE",
+    "journeyNumber": 7,
+    "type": "HIGH_SPEED_TRAIN",
+    "journeyDescription": "ICE 7",
+    "administration": {
+     "administrationID": "80",
+     "operatorCode": "---",
+     "operatorName": "DB"
+    }
+   },
+   "type": "DEPARTURE",
+   "vehicleSequenceAvailable": true
+  },
+  {
+   "arrivalOrDepartureID": "8000168_A_1",
+   "platform": "101",
+   "platformIfopt": "",
+   "platformSchedule": "101",
+   "platformScheduleIfopt": "",
+   "stopPlace": {
+    "evaNumber": "8000168",
+    "ifopt": "de:03360:92160",
+    "name": "Uelzen"
+   },
+   "time": "2026-11-03T13:08:43+01:00",
+   "timeSchedule": "2026-11-03T13:08:00+01:00",
+   "timeType": "REAL",
+   "transport": {
+    "category": "ICE",
+    "journeyNumber": 7,
+    "type": "HIGH_SPEED_TRAIN",
+    "journeyDescription": "ICE 7",
+    "administration": {
+     "administrationID": "80",
+     "operatorCode": "---",
+     "operatorName": "DB"
+    }
+   },
+   "type": "ARRIVAL"
+  },
+  {
+   "arrivalOrDepartureID": "8000168_D_1",
+   "platform": "101",
+   "platformIfopt": "",
+   "platformSchedule": "101",
+   "platformScheduleIfopt": "",
+   "stopPlace": {
+    "evaNumber": "8000168",
+    "ifopt": "de:03360:92160",
+    "name": "Uelzen"
+   },
+   "time": "2026-11-03T13:10:37+01:00",
+   "timeSchedule": "2026-11-03T13:10:00+01:00",
+   "timeType": "REAL",
+   "transport": {
+    "category": "ICE",
+    "journeyNumber": 7,
+    "type": "HIGH_SPEED_TRAIN",
+    "journeyDescription": "ICE 7",
+    "administration": {
+     "administrationID": "80",
+     "operatorCode": "---",
+     "operatorName": "DB"
+    }
+   },
+   "type": "DEPARTURE",
+   "vehicleSequenceAvailable": true
+  },
+  {
+   "arrivalOrDepartureID": "8000152_A_1",
+   "platform": "3",
+   "platformIfopt": "",
+   "platformSchedule": "3",
+   "platformScheduleIfopt": "",
+   "stopPlace": {
+    "evaNumber": "8000152",
+    "ifopt": "de:03241:31",
+    "name": "Hannover Hbf"
+   },
+   "time": "2026-11-03T13:47:34+01:00",
+   "timeSchedule": "2026-11-03T13:49:00+01:00",
+   "timeType": "REAL",
+   "transport": {
+    "category": "ICE",
+    "journeyNumber": 7,
+    "type": "HIGH_SPEED_TRAIN",
+    "journeyDescription": "ICE 7",
+    "administration": {
+     "administrationID": "80",
+     "operatorCode": "---",
+     "operatorName": "DB"
+    }
+   },
+   "type": "ARRIVAL"
+  },
+  {
+   "arrivalOrDepartureID": "8000026_D_1",
+   "platform": "3",
+   "platformIfopt": "",
+   "platformSchedule": "3",
+   "platformScheduleIfopt": "",
+   "stopPlace": {
+    "evaNumber": "8000026",
+    "ifopt": "ch:1:sloid:90",
+    "name": "Basel Bad Bf"
+   },
+   "time": "2026-11-03T19:14:00+01:00",
+   "timeSchedule": "2026-11-03T19:14:00+01:00",
+   "timeType": "PREVIEW",
+   "transport": {
+    "category": "ICE",
+    "journeyNumber": 7,
+    "type": "HIGH_SPEED_TRAIN",
+    "journeyDescription": "ICE 7",
+    "administration": {
+     "administrationID": "80",
+     "operatorCode": "---",
+     "operatorName": "DB"
+    }
+   },
+   "type": "DEPARTURE",
+   "vehicleSequenceAvailable": true
+  },
+  {
+   "arrivalOrDepartureID": "8500010_A_1",
+   "platform": "4",
+   "platformIfopt": "",
+   "platformSchedule": "4",
+   "platformScheduleIfopt": "",
+   "stopPlace": {
+    "evaNumber": "8500010",
+    "ifopt": "ch:1:sloid:10",
+    "name": "Basel SBB"
+   },
+   "time": "2026-11-03T19:21:00+01:00",
+   "timeSchedule": "2026-11-03T19:21:00+01:00",
+   "timeType": "PREVIEW",
+   "transport": {
+    "category": "ICE",
+    "journeyNumber": 7,
+    "type": "HIGH_SPEED_TRAIN",
+    "journeyDescription": "ICE 7",
+    "administration": {
+     "administrationID": "80",
+     "operatorCode": "---",
+     "operatorName": "DB"
+    }
+   },
+   "type": "ARRIVAL"
+  }
+ ],
+ "info": {
+  "destination": {
+   "evaNumber": "8500010",
+   "ifopt": "ch:1:sloid:10",
+   "name": "Basel SBB"
+  },
+  "headerAdministration": {
+   "administrationID": "80",
+   "operatorCode": "---",
+   "operatorName": "DB"
+  },
+  "headerJourneyNumber": 7,
+  "origin": {
+   "evaNumber": "8002548",
+   "ifopt": "de:02000:8002548",
+   "name": "Hamburg Dammtor"
+  },
+  "scheduledStartTime": "2026-11-03T12:21:00+01:00",
+  "transportAtStart": {
+   "administration": {
+    "administrationID": "80",
+    "operatorCode": "---",
+    "operatorName": "DB"
+   },
+   "category": "ICE",
+   "categoryInternal": "ICE",
+   "journeyDescription": "ICE 7",
+   "journeyNumber": 7,
+   "label": "",
+   "operationalJourneyNumber": "7",
+   "type": "HIGH_SPEED_TRAIN"
+  },
+  "type": "REGULAR"
+ },
+ "journeyID": "20261103-c5ed6631-9860-3f62-aa16-50637daedbaf"
+}

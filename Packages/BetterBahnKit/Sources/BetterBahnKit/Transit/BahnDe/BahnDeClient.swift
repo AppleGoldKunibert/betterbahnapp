@@ -137,6 +137,8 @@ public struct BahnDeClient: Sendable {
     struct Candidate {
         var station: Station
         var hasTrains: Bool
+        /// bahn.de's products stopping there: "ICE", "EC_IC", "REGIONAL", "SBAHN", "BUS", "TRAM", "UBAHN", …
+        var products: [String] = []
     }
 
     public func searchStations(_ query: String) async throws -> [Station] {
@@ -155,7 +157,7 @@ public struct BahnDeClient: Sendable {
             let coordinate = location.lat.flatMap { lat in location.lon.map { Coordinate(latitude: lat, longitude: $0) } }
             let hasTrains = (location.products ?? []).contains { Self.trainProducts.contains($0) }
             return Candidate(station: Station(id: eva, name: location.name, coordinate: coordinate, evaNumber: eva, source: .bahnDe),
-                             hasTrains: hasTrains)
+                             hasTrains: hasTrains, products: location.products ?? [])
         }
     }
 

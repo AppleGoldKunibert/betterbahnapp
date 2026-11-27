@@ -1,0 +1,208 @@
+{
+ "journeys": [
+  {
+   "info": {
+    "origin": {
+     "evaNumber": "8002549",
+     "ifopt": "de:02000:10950",
+     "name": "Hamburg Hbf"
+    },
+    "destination": {
+     "evaNumber": "8000096",
+     "ifopt": "de:08111:6115",
+     "name": "Stuttgart Hbf"
+    },
+    "transportAtStart": {
+     "category": "FLX",
+     "journeyNumber": 1243,
+     "line": "10",
+     "type": "INTER_REGIONAL_TRAIN",
+     "journeyDescription": "FLX 1243"
+    },
+    "headerJourneyNumber": 1243
+   },
+   "journeyID": "20261102-f6d04eab-a2ad-3c96-a255-27c4cb56c068",
+   "journeyRelation": {
+    "endEvaNumber": "8000096",
+    "endTime": "2026-11-02T21:45:00+01:00",
+    "headerAdministrationID": "FLX10",
+    "headerJourneyNumber": 1243,
+    "startAdministrationID": "FLX10",
+    "startCategory": "FLX",
+    "startEvaNumber": "8002549",
+    "startJourneyNumber": 1243,
+    "startTime": "2026-11-02T13:39:00+01:00"
+   }
+  },
+  {
+   "info": {
+    "origin": {
+     "evaNumber": "111034",
+     "ifopt": "de:06439:11034",
+     "name": "ehem. Bahnhof, Rüdesheim am Rhein"
+    },
+    "destination": {
+     "evaNumber": "118371",
+     "ifopt": "de:06439:18371",
+     "name": "Assmannshausen Schiffsanlegest., Rüdesheim am Rhei"
+    },
+    "transportAtStart": {
+     "category": "Bus",
+     "journeyNumber": 1243,
+     "line": "187",
+     "type": "BUS",
+     "journeyDescription": "Bus 187"
+    },
+    "headerJourneyNumber": 1243
+   },
+   "journeyID": "20261103-fb7ef7ec-9cd2-3874-9855-6eeaf23c100c",
+   "journeyRelation": {
+    "endEvaNumber": "118371",
+    "endTime": "2026-11-03T00:45:00+01:00",
+    "headerAdministrationID": "rmvRTO",
+    "headerJourneyNumber": 1243,
+    "startAdministrationID": "rmvRTO",
+    "startCategory": "Bus",
+    "startEvaNumber": "111034",
+    "startJourneyNumber": 1243,
+    "startTime": "2026-11-03T00:14:00+01:00"
+   }
+  },
+  {
+   "info": {
+    "origin": {
+     "evaNumber": "748326",
+     "ifopt": "de:12054:900230999",
+     "name": "Hauptbahnhof (S), Potsdam"
+    },
+    "destination": {
+     "evaNumber": "736170",
+     "ifopt": "de:12054:900230085",
+     "name": "Max-Born-Str., Potsdam"
+    },
+    "transportAtStart": {
+     "category": "Bus",
+     "journeyNumber": 1243,
+     "line": "N13",
+     "type": "BUS",
+     "journeyDescription": "Bus N13"
+    },
+    "headerJourneyNumber": 1243
+   },
+   "journeyID": "20261103-9f1159da-fa54-3cbd-8617-c7ce9df892fe",
+   "journeyRelation": {
+    "endEvaNumber": "736170",
+    "endTime": "2026-11-03T02:48:00+01:00",
+    "headerAdministrationID": "vbbVIB",
+    "headerJourneyNumber": 1243,
+    "startAdministrationID": "vbbVIB",
+    "startCategory": "Bus",
+    "startEvaNumber": "748326",
+    "startJourneyNumber": 1243,
+    "startTime": "2026-11-03T02:35:00+01:00"
+   }
+  },
+  {
+   "info": {
+    "origin": {
+     "evaNumber": "646866",
+     "ifopt": "de:16053:153078",
+     "name": "Zwätzen Schleife, Jena"
+    },
+    "destination": {
+     "evaNumber": "646888",
+     "ifopt": "de:16053:153124",
+     "name": "Lobeda-Ost, Jena"
+    },
+    "transportAtStart": {
+     "category": "STR",
+     "journeyNumber": 1243,
+     "line": "1",
+     "type": "TRAM",
+     "journeyDescription": "STR 1"
+    },
+    "headerJourneyNumber": 1243
+   },
+   "journeyID": "20261103-e5ef53da-1c22-3bd2-9017-f0ed9be4cc39",
+   "journeyRelation": {
+    "endEvaNumber": "646888",
+    "endTime": "2026-11-03T04:12:00+01:00",
+    "headerAdministrationID": "rmtJNV",
+    "headerJourneyNumber": 1243,
+    "startAdministrationID": "rmtJNV",
+    "startCategory": "STR",
+    "startEvaNumber": "646866",
+    "startJourneyNumber": 1243,
+    "startTime": "2026-11-03T03:27:00+01:00"
+   }
+  },
+  {
+   "info": {
+    "origin": {
+     "evaNumber": "712556",
+     "ifopt": "de:06611:200066",
+     "name": "Walther-Schücking-Platz, Kassel"
+    },
+    "destination": {
+     "evaNumber": "715589",
+     "ifopt": "de:06611:200052",
+     "name": "Mattenberg, Kassel"
+    },
+    "transportAtStart": {
+     "category": "STR",
+     "journeyNumber": 1243,
+     "line": "3",
+     "type": "TRAM",
+     "journeyDescription": "STR 3"
+    },
+    "headerJourneyNumber": 1243
+   },
+   "journeyID": "20261103-2ae6f4a8-0a65-3220-9840-9f86618a2176",
+   "journeyRelation": {
+    "endEvaNumber": "715589",
+    "endTime": "2026-11-03T05:40:00+01:00",
+    "headerAdministrationID": "rmv277",
+    "headerJourneyNumber": 1243,
+    "startAdministrationID": "rmv277",
+    "startCategory": "STR",
+    "startEvaNumber": "712556",
+    "startJourneyNumber": 1243,
+    "startTime": "2026-11-03T05:26:00+01:00"
+   }
+  },
+  {
+   "info": {
+    "origin": {
+     "evaNumber": "8002549",
+     "ifopt": "de:02000:10950",
+     "name": "Hamburg Hbf"
+    },
+    "destination": {
+     "evaNumber": "8000096",
+     "ifopt": "de:08111:6115",
+     "name": "Stuttgart Hbf"
+    },
+    "transportAtStart": {
+     "category": "FLX",
+     "journeyNumber": 1243,
+     "line": "10",
+     "type": "INTER_REGIONAL_TRAIN",
+     "journeyDescription": "FLX 1243"
+    },
+    "headerJourneyNumber": 1243
+   },
+   "journeyID": "20261103-f6d04eab-a2ad-3c96-a255-27c4cb56c068",
+   "journeyRelation": {
+    "endEvaNumber": "8000096",
+    "endTime": "2026-11-03T21:45:00+01:00",
+    "headerAdministrationID": "FLX10",
+    "headerJourneyNumber": 1243,
+    "startAdministrationID": "FLX10",
+    "startCategory": "FLX",
+    "startEvaNumber": "8002549",
+    "startJourneyNumber": 1243,
+    "startTime": "2026-11-03T13:39:00+01:00"
+   }
+  }
+ ]
+}

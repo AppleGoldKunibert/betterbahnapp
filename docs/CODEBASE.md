@@ -387,8 +387,23 @@ in `project.pbxproj`: new files join their target automatically.
 ### Transit
 
 - `Transit/TransitProvider.swift` – `TransitProvider` (`searchStations`, `journeys`, `board`, `trip`), `JourneyQuery`.
-- `Transit/CombinedProvider.swift` – what the app uses: `TransitousProvider` (no fallback configured), cooldown
+- `Transit/CombinedProvider.swift` – what the app uses: DB first, Transitous only where DB has no data: journeys from `RISRoutingProvider` (`dbJourneys`), boards from `DBBoardProvider` (`dbBoards`), stations from bahn.de's search (`stationsFromDB`, `dbStations(_:near:)`: not for one or two letters, RIL100 codes or a lone "Hbf"; a station once, without its other levels or the stops bahn.de bundles at it, `mergingStationParts`; "b"/"t" by bahn.de's products, "l" sorted on the device); `TransitousProvider` (`primary`) answers when DB finds nothing, fails or has no EVA; `RISRoutingProvider` is also the fallback; cooldown
   health check, `BahnDeClient`, `VagonwebClient`, `BahnExpertClient`, `TrainPositionClient`.
+- `Transit/DBBoards/DBBoardProvider.swift` – boards from DB: trains from DB Timetables (`TimetablesClient.boardStops`:
+  plan + fchg at every level – `knownLevels`, incl. the offline list's `StationNames.levels(of:)`: Berlin's S-Bahn
+  stations like "Berlin Gesundbrunnen(S)" (8089015), which `/station` doesn't name –, trains only in fchg,
+  `ppth`/`cpth` for the other end), buses/trams/subways from RIS::Boards through our server (`RISBoardsClient`,
+  `includeStationGroup`); a stop IRIS doesn't know gets everything from RIS::Boards. The other end reads like the
+  app's other names (`StationNames.displayName(ofDBStop:)`: DB's station by DHID, EVA or name without its level,
+  "Hermannstr.(S+U), Berlin" → "Berlin Hermannstraße"; a local stop without its lines and the board's own town,
+  "Leopoldplatz (U), Berlin" → "Leopoldplatz"; `Station.displayName(for:)` reads bahn.de's "<stop> (U), <town>"
+  like VBB's names and drops "(S)"/"(S-Bahn)"). Source `.bahnDe`; trip IDs are RIS journey IDs or `IRISTripReference` ("iris|ICE|23|eva|epoch|d"),
+  opened by `RISRoutingProvider.trip(id:)` from RIS::Journeys (`RISJourneysClient.trip`), else bahn.de.
+- `Transit/RISRouting/RISRoutingProvider.swift` – journeys from DB's own routing first, as in the DB Navigator
+  (RIS::Routing, `verkehrslage.db.info/api/routing/multimodal`, no key, undocumented). Stops by EVA number
+  (own, offline list incl. a multi-level station's main one, else a bahn.de hit with the very same name; never the
+  nearest: a bus stop's would be a railway station nearby), source `.bahnDe`: its journey IDs are bahn.de's, so `trip(id:)` reads bahn.de's
+  journey details through our server. Lines named like Transitous ("RE2 (29542)", "S5"). No board.
 - `Transit/StationSearch.swift` (#90) – shortcuts "b" (bus), "t" (tram), "l" (nearest first) as a separate word.
   Without "b", bus-only stops are left out of the picker unless nothing else matches;
   `TransitousProvider.searchStations(_:near:)` passes modes to the geocoder and filters after
@@ -533,6 +548,12 @@ in `project.pbxproj`: new files join their target automatically.
   (nicht)" in `TransferRow`) via `disposition(from:to:)`/`dispositions(in:now:)` (`dispositionStatus`, 15 min ago to
   3 h ahead, notifies once per `notificationID`). `ExpertTimes` (`liveTimes(category:number:day:)`, `ExpertTimesCache`
   2 min) referees bahn.de vs. DB Timetables in `applyingLiveTimes(…referee:)` (closer value wins, tie → Timetables).
+- `Transit/BahnExpert/RISJourneysClient.swift` – DB's RIS::Journeys through our server (`/db/apis/ris-journeys/v2/`,
+  the server adds the Marketplace key): `BahnExpertClient.call` asks it first for `journey/find` and
+  `journey/detailsByJourneyId` (same journey and stop IDs as bahn.expert) and hands the answer over in bahn.expert's
+  shape; bahn.expert only answers when it fails (then RIS pauses 2 min). `find` is asked without category (RIS takes it
+  strictly) and with `limit=1000` (20 by default), keeps the asked day's runs and puts the category, then trains first.
+  `coachSequence/departureSequence` and `connections/connections` stay on bahn.expert.
 - `Transit/TrainNumberSearch.swift` (#183) – bahn.expert's `journey/find` lists a number's runs (`TrainNumberQuery`,
   `ranked` by `TrainSearchFilter`/`TrainSearchCountry`), `detailsByJourneyId` their stops; `run(of:)` finds the run on
   a stop's board so the trip comes from Transitous.

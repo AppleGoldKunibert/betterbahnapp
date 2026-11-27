@@ -657,7 +657,7 @@ extension BahnDeClient {
         journeys.map { journey in
             var journey = journey
             journey.legs = journey.legs.map { leg in
-                guard !leg.isWalking, let line = leg.line, trainReference(for: line) != nil,
+                guard !leg.isWalking, leg.source != .bahnDe, let line = leg.line, trainReference(for: line) != nil,
                       let name = memory.name(for: line.name, now: now), normalizedTrainName(name) != normalizedTrainName(line.name) else { return leg }
                 var leg = leg
                 leg.line = renamed(line, to: name)
@@ -690,7 +690,8 @@ extension BahnDeClient {
     public func correctingTrainNames(in journeys: [Journey]) async -> [Journey] {
         struct Key: Hashable { let station: Station; let planned: Date; let line: Line }
         var keys = Set<Key>()
-        for leg in journeys.flatMap(\.legs) where !leg.isWalking && !leg.cancelled {
+        // DB's own journeys (`RISRoutingProvider`) already carry DB's names.
+        for leg in journeys.flatMap(\.legs) where !leg.isWalking && !leg.cancelled && leg.source != .bahnDe {
             if let line = leg.line, Self.trainReference(for: line) != nil {
                 keys.insert(Key(station: leg.origin, planned: leg.departure.planned, line: line))
             }

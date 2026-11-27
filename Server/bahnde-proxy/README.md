@@ -67,7 +67,7 @@ stops the scan (the log is still served), `TZ_RIS=false` the WiFi host.
 | `BLOCK_PAUSE` | `600` | The longest pause, reached when refusals keep coming. |
 | `MAX_PARALLEL` | `4` | Requests going to bahn.de at the same time. |
 | `MIN_INTERVAL` | `0.25` | Seconds between the starts of two requests to bahn.de. |
-| `RATE_LIMIT` | `120` | Requests per minute per app install. |
+| `RATE_LIMIT` | `120` | Requests per minute per app install, counted separately for bahn.de and RIS::Journeys. |
 | `TZ_DB` | `tz.db` next to `proxy.py` (`/data/tz.db` in Docker) | The Tz log's SQLite file. |
 | `TZ_SCAN` | `true` | `false` turns the scan off. |
 | `TZ_SCAN_INTERVAL` | `3` | Seconds between two requests of the scan. |
@@ -78,6 +78,7 @@ stops the scan (the log is still served), `TZ_RIS=false` the WiFi host.
 | `TZ_RIS_INTERVAL` | `2` | Seconds between two requests to the WiFi host (its firewall rejects an address that asks faster for long). |
 | `TZ_VEHICLE_EVERY` | `43200` | Seconds between two vehicle rounds. |
 | `ALLOW_UNATTESTED` | — | `true` lets requests without a token through. Only for a quick test, never in production. |
+| `DB_CLIENT_ID`, `DB_API_KEY` | — | DB API Marketplace key with RIS::Journeys and RIS::Boards. The server passes `/db/apis/ris-journeys/v2/find`, `/{journeyID}` and `/db/apis/ris-boards/v1/public/departures|arrivals/{eva}` on with it (train search, train courses, buses and trams on the boards); without it those paths answer 404. Put both into `.env`, never into the repo. |
 
 ## Run it
 
