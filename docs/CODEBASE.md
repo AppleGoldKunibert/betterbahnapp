@@ -203,7 +203,7 @@ in `project.pbxproj`: new files join their target automatically.
   Fahrkarte: Liquid Glass); on Fahrkarte the travel map's range and numbers and the live map's status are tickets
   with `MapTicketLabel` fields. The year review's cards are accent-colored stories on black (Minimal) or tickets on
   `Color.canvas` (Fahrkarte), in the shared image too. Accent marks use `Color.brandText`/`.onBrandText`; the
-  review's white-text stories darken the accent with `RGBColor.readable(on:)`. trains too. `LiveTrainsLayer.swift` (#505, all three maps): moves the own trains once a second along their track
+  review's white-text stories darken the accent with `RGBColor.readable(on:)`. trains too. `LiveTrainsLayer.swift` (#505, all three maps): moves the own trains along their track every 5 s (Kit `LiveMarkerPacing`, #609: up to 20 markers glide there, more or Low Power Mode jump, so the map doesn't redraw every frame)
   (Kit `LiveTrainMotion`, `OwnTrain` from the leg) and, with `AppSettings.showOtherTrains` (off by default; the "Andere Züge" button on all three maps, `OtherTrainsButton`, switches it and the next map starts the same way, `followsOtherTrainsSetting` reacts at once), shows every other train
   around (Kit `LiveTrainField`, at most 150, nearest the middle; `OtherTrainsAnnotator` for the MKMapView maps,
   `OtherTrainMarkerView` for the SwiftUI one). The position list (`TrainPositionClient.runningTrains`) comes at the position interval; Transitous' tracks

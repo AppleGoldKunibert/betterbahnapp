@@ -4,8 +4,8 @@ import Network
 import SwiftUI
 
 /// The live trains on a map (#505): the user's own trains and, if switched on, every other train
-/// around. Positions come in every 15 s or so; in between each train runs on along its track once a
-/// second, so the markers move smoothly instead of jumping.
+/// around. Positions come in every 15 s or so; in between each train runs on along its track every few
+/// seconds (`LiveMarkerPacing`), gliding there when only a few markers are on screen.
 @Observable @MainActor
 final class LiveTrainsLayer {
     /// A train of the user's that the map draws itself: its last fix and, if known, its track.
@@ -24,10 +24,12 @@ final class LiveTrainsLayer {
     /// At most this many other trains are drawn, the ones nearest the middle of the map.
     static let limit = 150
 
-    /// The other trains, where they are this second.
+    /// The other trains, where they are now (or, gliding, at the next step).
     private(set) var markers: [LiveTrainMarker] = []
-    /// The own trains, where they are this second, by name.
+    /// The own trains, where they are now (or, gliding, at the next step), by name.
     private(set) var ownCoordinates: [String: Coordinate] = [:]
+    /// How long the markers glide to their next spot (`LiveMarkerPacing`); nil jumps. The UIKit maps animate with it.
+    private(set) var glide: TimeInterval? = LiveMarkerPacing.forMarkers(0, lowPower: false).glide
     /// The own trains' speed, by name: bahn.jetzt's, else worked out from their last fixes.
     private(set) var ownSpeeds: [String: Double] = [:]
 
@@ -68,7 +70,7 @@ final class LiveTrainsLayer {
     @ObservationIgnored private var savingData: Bool?
 
     /// Runs for as long as the map shows: fetches bahn.jetzt's list at the position interval, loads
-    /// the tracks of what's on screen, and moves the markers every second.
+    /// the tracks of what's on screen, and moves the markers on (`LiveMarkerPacing`).
     func run(model: AppModel) async {
         self.model = model
         let monitor = NWPathMonitor()
@@ -77,11 +79,11 @@ final class LiveTrainsLayer {
             Task { @MainActor in self?.savingData = saving }
         }
         monitor.start(queue: .global(qos: .utility))
-        // Moves the markers every second while the fetches below run.
+        // Moves the markers on at `pacing`'s interval while the fetches below run.
         let ticker = Task { [weak self] in
             while !Task.isCancelled {
-                self?.tick()
-                try? await Task.sleep(for: .seconds(1))
+                guard let interval = self?.tick() else { return }
+                try? await Task.sleep(for: interval)
             }
         }
         defer {
@@ -274,18 +276,24 @@ final class LiveTrainsLayer {
         }
     }
 
-    private func tick() {
+    /// Moves the markers to where the trains are now, or, when they glide (`LiveMarkerPacing`), to where they
+    /// will be at the next step, so they arrive on time. Returns the time until the next step.
+    @discardableResult
+    private func tick() -> Duration {
         let now = Date.now
+        var others = visible.map { field.markers(at: now, in: $0.expanded(by: 0.1), limit: Self.limit) } ?? []
+        let pacing = LiveMarkerPacing.forMarkers(others.count + ownTrains.count,
+                                                 lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled)
+        let target = now.addingTimeInterval(pacing.glide ?? 0)
+        if pacing.glide != nil, let visible {
+            others = field.markers(at: target, in: visible.expanded(by: 0.1), limit: Self.limit)
+        }
         var raw: [String: Coordinate] = [:]
-        var others: [LiveTrainMarker] = []
-        if let visible {
-            others = field.markers(at: now, in: visible.expanded(by: 0.1), limit: Self.limit)
-            for marker in others { raw[marker.id] = marker.coordinate }
-        }
+        for marker in others { raw[marker.id] = marker.coordinate }
         for train in ownTrains where !waitsForTrack(train, at: now) {
-            raw["own:" + train.name] = motions[train.name]?.coordinate(at: now) ?? train.position.coordinate
+            raw["own:" + train.name] = motions[train.name]?.coordinate(at: target) ?? train.position.coordinate
         }
-        let shown = smoother.positions(raw, dataChanged: dataChanged, at: now)
+        let shown = smoother.positions(raw, dataChanged: dataChanged, at: target)
         dataChanged = false
         for index in others.indices {
             if let coordinate = shown[others[index].id] { others[index].coordinate = coordinate }
@@ -297,11 +305,13 @@ final class LiveTrainsLayer {
             speeds[train.name] = motions[train.name]?.speedKmh ?? train.position.speedKmh
         }
         if speeds != ownSpeeds { ownSpeeds = speeds }
-        // The maps move markers over the second in a straight line to the next spot.
-        withAnimation(.linear(duration: 1)) {
+        if glide != pacing.glide { glide = pacing.glide }
+        // Gliding, the maps move markers in a straight line to the next spot; else they jump there.
+        withAnimation(pacing.glide.map { Animation.linear(duration: $0) }) {
             markers = others
             ownCoordinates = own
         }
+        return pacing.interval
     }
 }
 
@@ -318,7 +328,7 @@ extension LiveTrainsLayer.OwnTrain {
 
 // MARK: - MapKit (UIKit) maps
 
-/// Another train on a UIKit map; its coordinate moves every second.
+/// Another train on a UIKit map; its coordinate moves at `LiveMarkerPacing`'s steps.
 final class OtherTrainAnnotation: NSObject, MKAnnotation {
     let id: String
     private(set) var opening: LiveTrainOpening?
@@ -359,7 +369,7 @@ final class OtherTrainsAnnotator {
     static let reuseIdentifier = "otherTrain"
     private var annotations: [String: OtherTrainAnnotation] = [:]
 
-    func sync(_ markers: [LiveTrainMarker], on map: MKMapView) {
+    func sync(_ markers: [LiveTrainMarker], glide: TimeInterval?, on map: MKMapView) {
         let current = Dictionary(markers.map { ($0.id, $0) }, uniquingKeysWith: { $1 })
         let gone = annotations.filter { current[$0.key] == nil }
         if !gone.isEmpty {
@@ -369,7 +379,7 @@ final class OtherTrainsAnnotator {
         let moved = current.compactMap { id, marker in annotations[id].map { ($0, marker) } }
         let added = current.filter { annotations[$0.key] == nil }.map { OtherTrainAnnotation($0.value) }
         for annotation in added { annotations[annotation.id] = annotation }
-        UIView.animate(withDuration: 1, delay: 0, options: [.curveLinear, .beginFromCurrentState, .allowUserInteraction]) {
+        Self.move(glide: glide) {
             for (annotation, marker) in moved {
                 annotation.coordinate = CLLocationCoordinate2D(latitude: marker.coordinate.latitude,
                                                                longitude: marker.coordinate.longitude)
@@ -377,6 +387,16 @@ final class OtherTrainsAnnotator {
             }
         }
         if !added.isEmpty { map.addAnnotations(added) }
+    }
+
+    /// Runs `changes` to the markers' coordinates as a straight glide over `glide` seconds, or at once without one.
+    static func move(glide: TimeInterval?, _ changes: @escaping () -> Void) {
+        guard let glide else {
+            UIView.performWithoutAnimation(changes)
+            return
+        }
+        UIView.animate(withDuration: glide, delay: 0, options: [.curveLinear, .beginFromCurrentState, .allowUserInteraction],
+                       animations: changes)
     }
 
     func view(for annotation: OtherTrainAnnotation, on map: MKMapView) -> MKAnnotationView {
