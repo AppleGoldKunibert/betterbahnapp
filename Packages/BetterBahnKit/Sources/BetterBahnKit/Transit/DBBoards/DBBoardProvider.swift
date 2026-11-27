@@ -125,7 +125,7 @@ public struct DBBoardProvider: Sendable {
                           time: TimeInfo(planned: item.timeSchedule, actual: live ? item.time : nil),
                           platform: PlatformInfo(planned: item.platformSchedule, actual: item.platform),
                           cancelled: item.canceled == true, terminatesOrOriginatesHere: nil,
-                          remarks: (item.messages ?? []).compactMap(\.text), source: .bahnDe)
+                          remarks: RISRoutingProvider.remarks((item.messages ?? []).compactMap(\.text)), source: .bahnDe)
     }
 }
 

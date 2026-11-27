@@ -287,7 +287,7 @@ public struct RISRoutingProvider: TransitProvider {
         let last = Stopover(station: destination, arrival: time(arrival), departure: nil,
                             arrivalPlatform: platform(arrival.platformSchedule, arrival.platform), departurePlatform: nil,
                             cancelled: arrival.canceled == true, access: access(arrival.messages))
-        let remarks = unique(((departure.messages ?? []) + (arrival.messages ?? [])).compactMap(\.text).filter { access([$0]) == .normal })
+        let remarks = Self.remarks(((departure.messages ?? []) + (arrival.messages ?? [])).compactMap(\.text).filter { access([$0]) == .normal })
         return Leg(origin: origin, destination: destination, departure: time(departure), arrival: time(arrival),
                    departurePlatform: first.departurePlatform, arrivalPlatform: last.arrivalPlatform,
                    tripId: result.extJourneyID, line: line, direction: transport?.direction?.text,
@@ -420,6 +420,11 @@ public struct RISRoutingProvider: TransitProvider {
         if texts.contains(where: { $0.localizedCaseInsensitiveContains("nur zum Einsteigen") }) { return .entryOnly }
         if texts.contains(where: { $0.localizedCaseInsensitiveContains("nur zum Aussteigen") }) { return .exitOnly }
         return .normal
+    }
+
+    /// DB's free texts worth showing, each once: staff sometimes leave a bare "2" or "-", which said nothing.
+    public static func remarks(_ texts: [String]) -> [String] {
+        unique(texts.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { $0.filter(\.isLetter).count >= 2 })
     }
 
     static func unique(_ texts: [String]) -> [String] {

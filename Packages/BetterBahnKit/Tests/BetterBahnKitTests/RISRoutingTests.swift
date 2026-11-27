@@ -120,6 +120,12 @@ import Testing
         #expect(leg.departure.actual != nil)
     }
 
+    /// A bare "2" from DB's staff showed as a warning on an S42 leg.
+    @Test func remarksWithoutWordsAreLeftOut() {
+        #expect(RISRoutingProvider.remarks(["2", " - ", "Reparatur an einer Weiche", "Reparatur an einer Weiche ", "+5"])
+                == ["Reparatur an einer Weiche"])
+    }
+
     @Test func productsFromTypeAndCategory() {
         #expect(RISRoutingProvider.product(type: "INTERCITY_TRAIN", category: "NJ", name: "NJ 295") == .nightTrain)
         #expect(RISRoutingProvider.product(type: "INTERCITY_TRAIN", category: "EC", name: "EC 213") == .longDistance)
