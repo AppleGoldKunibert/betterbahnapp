@@ -19,7 +19,7 @@ struct JourneyMapView: View {
         NavigationStack {
             JourneyMap(journey: journey, version: mapVersion, trains: trains, shownTrains: layer.ownCoordinates,
                        trainSpeeds: layer.ownSpeeds,
-                       otherTrains: layer.markers, onRegionChange: { layer.setVisible($0, model: model) },
+                       otherTrains: layer.markers, markerGlide: layer.glide, onRegionChange: { layer.setVisible($0, model: model) },
                        onTrainTap: { tappedTrain = LiveTrainTripRequest(opening: $0) },
                        onMarkerTap: { selectedTransfer = $0 })
                 .sheet(item: $tappedTrain) { LiveTrainTripSheet(opening: $0.opening) }
@@ -153,6 +153,8 @@ struct JourneyMap: UIViewRepresentable {
     var trainSpeeds: [String: Double] = [:]
     /// The other trains around (#505).
     var otherTrains: [LiveTrainMarker] = []
+    /// How long the trains glide to their next spot (`LiveTrainsLayer.glide`); nil jumps.
+    var markerGlide: TimeInterval?
     var onRegionChange: (MKCoordinateRegion) -> Void = { _ in }
     /// A tapped other train's route, by Transitous trip ID.
     var onTrainTap: (LiveTrainOpening) -> Void = { _ in }
@@ -178,8 +180,8 @@ struct JourneyMap: UIViewRepresentable {
         coordinator.onMarkerTap = onMarkerTap
         coordinator.onRegionChange = onRegionChange
         coordinator.onTrainTap = onTrainTap
-        coordinator.syncTrains(trains, shown: shownTrains, speeds: trainSpeeds, on: map)
-        coordinator.otherTrains.sync(otherTrains, on: map)
+        coordinator.syncTrains(trains, shown: shownTrains, speeds: trainSpeeds, glide: markerGlide, on: map)
+        coordinator.otherTrains.sync(otherTrains, glide: markerGlide, on: map)
 
         // Route and markers only when the journey changed, so the periodic train refresh doesn't
         // redraw everything and zoom back out.
@@ -240,7 +242,7 @@ struct JourneyMap: UIViewRepresentable {
         private var trainAnnotations: [String: TrainAnnotation] = [:]
 
         /// Adds, moves and removes train markers in place so an open callout survives the refresh.
-        func syncTrains(_ trains: [LiveTrainPosition], shown: [String: Coordinate], speeds: [String: Double], on map: MKMapView) {
+        func syncTrains(_ trains: [LiveTrainPosition], shown: [String: Coordinate], speeds: [String: Double], glide: TimeInterval?, on map: MKMapView) {
             let current = Dictionary(trains.map { ($0.trainName, $0) }, uniquingKeysWith: { $1 })
             for (name, annotation) in trainAnnotations where current[name] == nil {
                 map.removeAnnotation(annotation)
@@ -248,7 +250,7 @@ struct JourneyMap: UIViewRepresentable {
             }
             for (name, live) in current {
                 if let annotation = trainAnnotations[name] {
-                    UIView.animate(withDuration: 1, delay: 0, options: [.curveLinear, .beginFromCurrentState, .allowUserInteraction]) {
+                    OtherTrainsAnnotator.move(glide: glide) {
                         annotation.update(live, shown: shown[name], speed: speeds[name])
                     }
                     (map.view(for: annotation) as? MKMarkerAnnotationView)?.markerTintColor = annotation.isStale ? .systemGray : UIColor(Color.brandText)
